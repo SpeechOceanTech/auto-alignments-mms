@@ -1,20 +1,59 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>长音频文本对齐</title><link rel="stylesheet" href="/static/style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>长音频文本对齐服务</title>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header><div><p class="eyebrow">MMS ALIGNMENT</p><h1>长音频文本对齐</h1><p>上传录音和逐句文本，生成带时间戳的对齐结果。</p></div><span class="badge">本地服务</span></header>
-<main>
-<div class="warning">此服务没有账号和身份验证。仅限可信环境使用，请勿直接暴露到公网。</div>
-<section class="card"><div class="section-title"><div><h2>新建对齐任务</h2><p>每行输入一句文本，顺序需与录音一致。</p></div></div>
-<form id="submit-form">
-<div class="columns"><label>音频文件<input name="audio" type="file" accept=".wav,.mp3,.flac,.m4a,.ogg,.opus,.aac,.webm" required><small>支持 WAV、MP3、FLAC 等格式</small></label><label>语种<input name="language" list="languages" value="cmn" required autocomplete="off"><datalist id="languages"></datalist><small>选择常用语种，或输入三位 ISO 639-3 代码</small></label></div>
-<label>文本文件 <span class="muted">（UTF-8，可选）</span><input name="text_file" id="text-file" type="file" accept=".txt,text/plain"><small>上传文本文件或在下方直接输入，二选一。</small></label>
-<label>逐句文本<textarea name="text" id="text" rows="7" placeholder="第一句文本&#10;第二句文本"></textarea></label>
-<div class="actions"><button type="submit" id="submit">提交任务 <span>→</span></button><span id="submit-message" role="status"></span></div>
-</form></section>
-<section class="card"><div class="section-title"><div><h2>任务记录</h2><p>任务状态会自动刷新。运行中的任务无法删除。</p></div><button class="secondary" id="refresh">刷新</button></div><div id="jobs" aria-live="polite"><p class="empty">正在加载…</p></div></section>
-</main><footer>输出包含 CSV、TextGrid 和文本文件 · 请核验对齐结果</footer>
-<script src="/static/app.js"></script></body></html>
+  <header>
+    <h1>长音频文本对齐服务 <span class="title-en">MMS Alignment Service</span></h1>
+    <div class="header-account"><span id="health" class="service-status" role="status" aria-label="正在检查服务"></span><span id="account-label"></span><button id="logout" type="button" class="outline" hidden>退出</button></div>
+  </header>
+  <section id="account-panel" class="account-panel" hidden>
+    <h2>邮箱登录</h2>
+    <p>输入企业邮箱并获取验证码，首次登录将自动创建账号。</p>
+    <div class="field"><label for="account-email">邮箱</label><input id="account-email" type="email" autocomplete="email" placeholder="name@dataoceanai.com"></div>
+    <div class="field"><label for="account-code">邮箱验证码</label><div class="account-code-row"><input id="account-code" type="text" inputmode="numeric" autocomplete="one-time-code"><button id="login-code" type="button">获取验证码</button></div></div>
+    <button id="verify-code" type="button">登录</button>
+    <p id="account-message" class="message" role="status"></p>
+  </section>
+  <main id="workspace" hidden>
+    <nav id="admin-navigation" class="admin-navigation" aria-label="管理页面" hidden>
+      <button id="tab-details" class="active" type="button">任务详情</button><button id="tab-api-keys" type="button">API 密钥</button><button id="tab-accounts" type="button" hidden>账号管理</button>
+    </nav>
+    <div id="task-detail-panel" class="task-detail-panel">
+      <section class="controls">
+        <h2>新建对齐任务</h2>
+        <form id="submit-form">
+          <div class="field"><label for="language">语种 / Language</label><div class="language-picker"><input id="language" name="language" value="zh_cn" required autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="language-options"><div id="language-options" class="language-options" role="listbox" hidden></div></div><small>输入语种名称、代码或别名搜索，也可直接输入代码</small></div>
+          <div class="field"><label for="audio">音频文件 / Audio</label><input id="audio" name="audio" type="file" accept=".wav,.mp3,.flac,.m4a,.ogg,.opus,.aac,.webm" required></div>
+          <div class="field"><label for="text-file">文本文件（UTF-8）</label><input name="text_file" id="text-file" type="file" accept=".txt,text/plain"><small>上传文件或在下方输入，二选一；每行一句。</small></div>
+          <div class="field"><label for="text">逐句文本</label><textarea name="text" id="text" rows="7" placeholder="第一句文本&#10;第二句文本"></textarea></div>
+          <button type="submit" id="submit">提交任务</button>
+          <div id="upload-progress" class="upload-progress" hidden><div class="upload-progress-track"><div id="upload-progress-bar"></div></div><small id="upload-progress-text"></small></div>
+          <p id="submit-message" class="message" role="status"></p>
+        </form>
+      </section>
+      <section class="jobs">
+        <div class="toolbar"><h2>任务 / Jobs</h2><div class="toolbar-actions"><span id="selection-count" class="selection-count"></span><button id="delete-selected" class="outline danger" type="button" disabled>删除所选</button><button id="download-selected" class="outline" type="button" disabled>下载所选</button><button id="refresh" class="outline" type="button">刷新</button></div></div>
+        <div class="job-filters">
+          <div class="field"><label for="filter-language">语种</label><div class="language-picker"><input id="filter-language" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="filter-language-options" placeholder="全部语种"><div id="filter-language-options" class="language-options" role="listbox" hidden></div></div></div>
+          <div class="field"><label for="filter-status">状态</label><select id="filter-status"><option value="">全部状态</option><option value="queued">排队中</option><option value="running">对齐中</option><option value="completed">已完成</option><option value="failed">失败</option></select></div>
+          <div class="field"><label for="filter-q">文件名 / 任务 ID</label><input id="filter-q" type="search" placeholder="搜索"></div>
+          <div class="field"><label for="filter-from">开始日期</label><input id="filter-from" type="date"></div><div class="field"><label for="filter-to">结束日期</label><input id="filter-to" type="date"></div>
+          <button id="clear-filters" class="outline" type="button">清除</button>
+        </div>
+        <div class="jobs-table-wrap"><table><thead><tr><th><input id="select-all" type="checkbox" aria-label="选择所有任务"></th><th>文件</th><th>语种</th><th>创建时间</th><th>任务 ID</th><th>状态</th><th>操作 / 下载</th></tr></thead><tbody id="jobs"></tbody></table></div>
+        <div class="pager"><button id="prev-page" class="outline" type="button">上一页</button><span id="page-info">0–0 / 0</span><button id="next-page" class="outline" type="button">下一页</button></div>
+        <p id="jobs-message" class="message" role="status"></p>
+      </section>
+      <section id="review" class="review" hidden><div class="toolbar"><h2 id="review-title">任务详情</h2><button id="close-review" class="outline" type="button">关闭</button></div><div class="review-grid"><div><audio id="review-audio" controls preload="none"></audio><h3>输入文本</h3><pre id="review-input"></pre></div><div><h3>对齐结果 <small>点击句子跳转播放位置</small></h3><div id="segment-list" class="segment-list"></div></div></div></section>
+    </div>
+    <section id="api-keys-panel" class="admin-panel" hidden><div class="toolbar"><h2>API 密钥</h2><button id="refresh-api-keys" class="outline" type="button">刷新</button></div><div class="api-key-content"><p>使用密钥在 API 请求中携带 <code>Authorization: Bearer &lt;密钥&gt;</code>。密钥只在创建时显示一次，请妥善保存。</p><form id="api-key-form" class="api-key-form"><div class="field"><label for="api-key-name">密钥名称</label><input id="api-key-name" maxlength="100" required placeholder="例如：我的脚本"></div><button id="api-key-create" type="submit">创建密钥</button></form><div id="new-api-key" class="new-api-key" hidden><strong>请立即复制密钥；关闭或离开此页面后将无法再次查看。</strong><div class="api-key-secret-row"><input id="api-key-secret" readonly aria-label="新创建的 API 密钥"><button id="copy-api-key" class="outline" type="button">复制</button><button id="close-api-key" class="outline" type="button">关闭</button></div></div><div id="api-key-list"></div><p id="api-key-message" class="message" role="status"></p></div></section>
+    <section id="admin-accounts" class="admin-panel" hidden><div class="toolbar"><h2>账号管理</h2><button id="refresh-users" class="outline" type="button">刷新</button></div><p class="admin-description">管理已登录用户的状态和管理员权限。</p><div id="user-list"></div><p id="admin-message" class="message" role="status"></p></section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -31,9 +31,11 @@ export ALIGN_DEVICE=cuda:0
 
 CSV、文本的 `start` 和 `end` 单位均为秒，TextGrid 使用 `sentences` interval tier。处理流程与原脚本一致：转换为 16 kHz 单声道，使用 Silero VAD 检测语音，以 MMS 对齐文本，再根据静音区间修正句子边界。原脚本中的 ASR 识别和文字复核代码处于注释状态，不属于其实际执行流程。
 
-常用语言可在网页中选择，也可输入三字母 ISO 639-3 代码，例如 `cmn`、`eng`、`jpn`；支持常见两字母代码和地区码（如 `zh_cn`、`en_us`）。自由输入只验证代码格式，不保证模型对所有语言的覆盖或准确性。语言信息参考 [MMS ISO 信息表](https://github.com/MXuer/mms-alignment-tools/blob/main/MMS_ISO_Information.md)。
+网页默认使用 `zh_cn` 形式的语种地区代码，输入中文名、英文名、地区代码或 ISO 代码即可搜索。目录包含 145 个地区选项、97 个语种；也可直接输入三字母 ISO 639-3 代码。语言信息参考 [MMS ISO 信息表](https://github.com/MXuer/mms-alignment-tools/blob/main/MMS_ISO_Information.md)。
 
 ## 网页和 API
+
+先按下方“账户服务”配置密钥文件和 SMTP，再启动：
 
 ```bash
 python -m alignment_web.app
@@ -41,7 +43,18 @@ python -m alignment_web.app
 
 在服务器本机打开 `http://127.0.0.1:10076/`，或在同一网络的 MacBook 上打开 `http://服务器IP:10076/`。上传音频并填写文本或上传文本文件，选择语言后提交。任务单进程排队执行，可查看状态、输入和结果，下载三种格式，删除已完成或失败的任务。任务与文件默认保存在 `service_data/`；进程重启时未完成的运行中任务会标记失败，排队任务会继续。
 
-默认监听所有网络接口，服务没有登录、权限隔离或用户配额。不要以多个服务进程共享同一任务目录运行。音频默认上限为 2048 MiB，文本上限为 2 MiB。可通过环境变量配置：
+用户使用 `@dataoceanai.com` 企业邮箱接收验证码登录，首次验证时自动创建账号。默认管理员为 `duhu@dataoceanai.com`，可管理用户状态和管理员权限；普通用户只能访问自己的任务，迁移前的无主任务由管理员查看。网页的“API 密钥”可创建和撤销个人密钥，密钥明文只显示一次。不要以多个服务进程共享同一任务目录运行。音频默认上限为 2048 MiB，文本上限为 2 MiB。
+
+### 账户服务
+
+启动账户服务前需配置独立的账户签名密钥文件和企业邮箱 SMTP 密码文件，文件须由服务用户拥有且权限为 `600`；密钥和密码不要提交到仓库。密钥至少 32 字节且须持久保存，删除或更换会使会话和 API 密钥失效。SMTP 密码可沿用现有 Semantic ASR 服务的私有文件：
+
+```bash
+export ALIGN_AUTH_SECRET_FILE=/path/to/private/alignment-account.key
+export ALIGN_SMTP_PASSWORD_FILE=/home/duhu/.config/semantic-asr/smtp-password
+```
+
+未配置账户文件时，账户接口不可用。默认监听所有网络接口；可通过环境变量配置：
 
 | 变量 | 默认值 | 作用 |
 | --- | --- | --- |
@@ -49,14 +62,21 @@ python -m alignment_web.app
 | `ALIGN_WEB_PORT` | `10076` | 监听端口 |
 | `ALIGN_WEB_DATA_DIR` | `service_data` | 任务和上传文件存储目录 |
 | `ALIGN_WEB_MAX_AUDIO_MB` | `2048` | 音频大小上限，单位 MiB |
+| `ALIGN_AUTH_SECRET_FILE` | 无 | 账户签名密钥文件 |
+| `ALIGN_SMTP_PASSWORD_FILE` | 无 | SMTP 密码文件 |
+| `ALIGN_SMTP_HOST` / `ALIGN_SMTP_PORT` | `smtp.qiye.aliyun.com` / `465` | SMTP SSL 地址 |
+| `ALIGN_SMTP_USER` / `ALIGN_SMTP_FROM` | `duhu@dataoceanai.com` | 邮箱账号和发件地址 |
+| `ALIGN_ADMIN_EMAIL` | `duhu@dataoceanai.com` | 首位管理员邮箱 |
+| `ALIGN_AUTH_SECURE_COOKIE` | `0` | HTTPS 部署设为 `1` |
 
 接口文档位于 `/docs`。例如：
 
 ```bash
 curl -X POST http://127.0.0.1:10076/v1/jobs \
-  -F 'audio=@audio.wav' -F 'text_file=@sentences.txt' -F 'language=cmn'
-curl http://127.0.0.1:10076/v1/jobs/JOB_ID
-curl -O -J http://127.0.0.1:10076/v1/jobs/JOB_ID/artifacts/csv
+  -H "Authorization: Bearer $ALIGN_API_KEY" \
+  -F 'audio=@audio.wav' -F 'text_file=@sentences.txt' -F 'language=zh_cn'
+curl -H "Authorization: Bearer $ALIGN_API_KEY" http://127.0.0.1:10076/v1/jobs/JOB_ID
+curl -O -J -H "Authorization: Bearer $ALIGN_API_KEY" http://127.0.0.1:10076/v1/jobs/JOB_ID/artifacts/csv
 ```
 
 也可以用 `text` 表单字段直接提交文本。`GET /v1/jobs` 列出任务，`GET /v1/languages` 返回常用语言，`DELETE /v1/jobs/{id}` 删除已结束任务及文件。服务需有足够的磁盘空间来保存上传内容和转换音频，清理任务会删除其输入和输出。
@@ -64,10 +84,10 @@ curl -O -J http://127.0.0.1:10076/v1/jobs/JOB_ID/artifacts/csv
 ## 命令行
 
 ```bash
-python align_cli.py audio.wav sentences.txt cmn output/
+python align_cli.py audio.wav sentences.txt zh_cn output/
 ```
 
-运行测试：`python -m unittest discover -s tests -v`。
+安装 `requirements-dev.txt` 后可用 `python -m pytest tests -q` 运行全部测试。
 
 使用本机 MMS 权重、PyTorch/torchaudio 和 GPU 可运行真实音频的端到端测试。
 

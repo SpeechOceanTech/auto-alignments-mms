@@ -1,20 +1,27 @@
-"""Single-process HTTP service. No authentication is provided."""
+"""Single-process HTTP service for authenticated alignment jobs."""
 import logging
+import csv
 import os
 import re
 import shutil
+import stat
+import tempfile
 import threading
 import uuid
+import zipfile
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
-from alignment_languages import COMMON_LANGUAGES, normalize_language
+from alignment_languages import COMMON_LANGUAGES, canonical_locale, normalize_language
 
 from .store import JobStore
+from .auth import AuthStore, SmtpCodeSender, require_account, router as auth_router
 
 LOG = logging.getLogger(__name__)
 TEXT_LIMIT = 2 * 1024 * 1024
@@ -57,7 +64,19 @@ def _default_runner(audio_path, text_path, language, output_dir):
     return align(audio_path, text_path, language, output_dir)
 
 
-def create_app(data_dir=None, runner=None, max_audio_bytes=None):
+def _private_file(path):
+    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+    with os.fdopen(fd, 'rb') as source:
+        metadata = os.fstat(source.fileno())
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid() or metadata.st_mode & 0o077:
+            raise ValueError('账户密钥文件须为当前用户所有且权限为 600')
+        value = source.read(4097)
+    if len(value) > 4096:
+        raise ValueError('账户密钥文件过大')
+    return value.strip()
+
+
+def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None):
     data_dir = Path(data_dir or os.environ.get('ALIGN_WEB_DATA_DIR', 'service_data')).resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
     jobs_dir = data_dir / 'jobs'
@@ -72,17 +91,36 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None):
     app = FastAPI(title='MMS Audio Alignment API', description='长音频与文本自动对齐服务。')
     app.add_middleware(LimitBody, max_bytes=max_audio_bytes + TEXT_LIMIT + FORM_OVERHEAD)
     app.mount('/static', StaticFiles(directory=STATIC_ROOT), name='static')
+    if auth_store is None:
+        secret_file = os.environ.get('ALIGN_AUTH_SECRET_FILE', '')
+        smtp_file = os.environ.get('ALIGN_SMTP_PASSWORD_FILE', '')
+        if bool(secret_file) != bool(smtp_file):
+            raise ValueError('请同时配置账户密钥与邮件密码文件')
+        if secret_file:
+            secret = _private_file(secret_file)
+            password = _private_file(smtp_file).decode('utf-8')
+            if not password:
+                raise ValueError('邮件密码文件为空')
+            smtp_user = os.environ.get('ALIGN_SMTP_USER', 'duhu@dataoceanai.com')
+            sender = SmtpCodeSender(os.environ.get('ALIGN_SMTP_HOST', 'smtp.qiye.aliyun.com'),
+                                    int(os.environ.get('ALIGN_SMTP_PORT', '465')), smtp_user, password,
+                                    os.environ.get('ALIGN_SMTP_FROM', smtp_user))
+            auth_store = AuthStore(data_dir / 'accounts.sqlite3', secret, sender,
+                                   admin_email=os.environ.get('ALIGN_ADMIN_EMAIL', 'duhu@dataoceanai.com'))
     app.state.store = store
+    app.state.auth_store = auth_store
+    app.state.auth_secure_cookie = os.environ.get('ALIGN_AUTH_SECURE_COOKIE', '0') == '1'
+    app.include_router(auth_router)
 
     def job_dir(job_id):
         if not JOB_PATTERN.fullmatch(job_id):
             raise HTTPException(404, '任务不存在')
         return jobs_dir / job_id
 
-    def get_job(job_id):
+    def get_job(job_id, user):
         job_dir(job_id)
         job = store.get(job_id)
-        if job is None:
+        if job is None or (not user['is_admin'] and job['owner_id'] != user['id']):
             raise HTTPException(404, '任务不存在')
         if job['status'] == 'completed':
             job['artifacts'] = [name for name, filename in FORMATS.items() if (job_dir(job_id) / 'output' / filename).is_file()]
@@ -145,16 +183,65 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None):
         return {'languages': COMMON_LANGUAGES}
 
     @app.get('/v1/jobs')
-    def list_jobs(limit: int = 50, offset: int = 0):
+    def list_jobs(limit: int = 50, offset: int = 0, status: Optional[str] = None,
+                  language: Optional[str] = None, q: Optional[str] = None,
+                  created_from: Optional[date] = None, created_to: Optional[date] = None,
+                  user: dict = Depends(require_account)):
         limit, offset = max(1, min(limit, 200)), max(0, offset)
-        jobs, total = store.list(limit, offset)
-        return {'jobs': [get_job(job['id']) for job in jobs], 'total': total, 'limit': limit, 'offset': offset}
+        if status and status not in {'queued', 'running', 'completed', 'failed'}:
+            raise HTTPException(400, '无效的任务状态')
+        if created_from and created_to and created_from > created_to:
+            raise HTTPException(400, '开始日期不能晚于结束日期')
+        legacy_language = None
+        if language:
+            try:
+                language = canonical_locale(language)
+                legacy_language = normalize_language(language)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc))
+        jobs, total = store.list(limit, offset, status, language, q,
+                                 str(created_from) if created_from else None,
+                                 str(created_to) if created_to else None,
+                                 owner_id=None if user['is_admin'] else user['id'],
+                                 legacy_language=legacy_language)
+        return {'jobs': [get_job(job['id'], user) for job in jobs], 'total': total, 'limit': limit, 'offset': offset}
+
+    @app.get('/v1/jobs/bulk-artifacts.zip')
+    def bulk_artifacts(job_ids: str, formats: str = 'csv,textgrid,txt', user: dict = Depends(require_account)):
+        ids = list(dict.fromkeys(part.strip() for part in job_ids.split(',') if part.strip()))
+        selected = list(dict.fromkeys(part.strip().lower() for part in formats.split(',') if part.strip()))
+        if not ids or len(ids) > 200:
+            raise HTTPException(400, '请选择 1 至 200 个任务')
+        if not selected or any(kind not in FORMATS for kind in selected):
+            raise HTTPException(400, '请选择有效的结果格式')
+        files = []
+        for job_id in ids:
+            job = get_job(job_id, user)
+            if job['status'] != 'completed':
+                raise HTTPException(409, '只能下载已完成的任务')
+            for kind in selected:
+                path = job_dir(job_id) / 'output' / FORMATS[kind]
+                if not path.is_file():
+                    raise HTTPException(404, '结果文件不存在')
+                files.append((path, f'{job_id}/{FORMATS[kind]}'))
+        temporary = tempfile.NamedTemporaryFile(prefix='alignment-export-', suffix='.zip', delete=False)
+        temporary.close()
+        try:
+            with zipfile.ZipFile(temporary.name, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+                for path, archive_name in files:
+                    archive.write(path, archive_name)
+        except BaseException:
+            Path(temporary.name).unlink(missing_ok=True)
+            raise
+        return FileResponse(temporary.name, filename='alignment-results.zip', media_type='application/zip',
+                            background=BackgroundTask(Path(temporary.name).unlink, missing_ok=True))
 
     @app.post('/v1/jobs', status_code=202)
     async def create_job(audio: UploadFile = File(...), language: str = Form(...),
-                         text: str = Form(''), text_file: Optional[UploadFile] = File(None)):
+                         text: str = Form(''), text_file: Optional[UploadFile] = File(None),
+                         user: dict = Depends(require_account)):
         try:
-            language = normalize_language(language)
+            language = canonical_locale(language)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         suffix = Path(audio.filename or '').suffix.lower()
@@ -191,7 +278,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None):
             if size == 0:
                 raise HTTPException(400, '音频文件为空')
             (directory / 'input.txt').write_text(decoded, encoding='utf-8')
-            store.create(job_id, language, Path(audio.filename or 'audio').stem[:200] + suffix)
+            store.create(job_id, language, Path(audio.filename or 'audio').stem[:200] + suffix, user['id'])
         except BaseException:
             shutil.rmtree(directory, ignore_errors=True)
             raise
@@ -203,12 +290,39 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None):
         return {'job_id': job_id, 'status': 'queued'}
 
     @app.get('/v1/jobs/{job_id}')
-    def job_detail(job_id: str):
-        return get_job(job_id)
+    def job_detail(job_id: str, user: dict = Depends(require_account)):
+        return get_job(job_id, user)
+
+    @app.post('/v1/jobs/{job_id}/retry')
+    def retry_job(job_id: str, user: dict = Depends(require_account)):
+        job = get_job(job_id, user)
+        if job['status'] != 'failed':
+            raise HTTPException(409, '只有失败的任务可以重试')
+        if not (job_dir(job_id) / ('audio' + Path(job['audio_name']).suffix.lower())).is_file() or not (job_dir(job_id) / 'input.txt').is_file():
+            raise HTTPException(404, '输入文件不存在')
+        if not store.retry(job_id):
+            raise HTTPException(409, '任务状态已改变')
+        wake.set()
+        return get_job(job_id, user)
+
+    @app.get('/v1/jobs/{job_id}/sentences')
+    def sentences(job_id: str, user: dict = Depends(require_account)):
+        job = get_job(job_id, user)
+        path = job_dir(job_id) / 'output' / FORMATS['csv']
+        if job['status'] != 'completed' or not path.is_file():
+            raise HTTPException(404, '对齐结果不存在')
+        try:
+            with path.open(encoding='utf-8-sig', newline='') as source:
+                return [{'id': row['id'], 'start': float(row['start']),
+                         'end': float(row['end']), 'text': row['text']}
+                        for row in csv.DictReader(source)]
+        except (KeyError, ValueError, csv.Error) as exc:
+            LOG.exception('Invalid CSV result for job %s', job_id)
+            raise HTTPException(500, '对齐结果格式无效') from exc
 
     @app.get('/v1/jobs/{job_id}/input/{kind}')
-    def input_file(job_id: str, kind: str):
-        job = get_job(job_id)
+    def input_file(job_id: str, kind: str, user: dict = Depends(require_account)):
+        job = get_job(job_id, user)
         if kind == 'audio':
             path = job_dir(job_id) / ('audio' + Path(job['audio_name']).suffix.lower())
         elif kind == 'text':
@@ -220,8 +334,8 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None):
         return FileResponse(path, media_type='text/plain; charset=utf-8' if kind == 'text' else None)
 
     @app.get('/v1/jobs/{job_id}/artifacts/{kind}')
-    def artifact(job_id: str, kind: str):
-        job = get_job(job_id)
+    def artifact(job_id: str, kind: str, user: dict = Depends(require_account)):
+        job = get_job(job_id, user)
         if job['status'] != 'completed' or kind not in FORMATS:
             raise HTTPException(404, '结果文件不存在')
         path = job_dir(job_id) / 'output' / FORMATS[kind]
@@ -230,8 +344,8 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None):
         return FileResponse(path, filename=FORMATS[kind], media_type='application/octet-stream')
 
     @app.delete('/v1/jobs/{job_id}')
-    def delete_job(job_id: str):
-        job = get_job(job_id)
+    def delete_job(job_id: str, user: dict = Depends(require_account)):
+        job = get_job(job_id, user)
         if not store.delete(job_id):
             raise HTTPException(409, '排队中或运行中的任务不能删除')
         shutil.rmtree(job_dir(job_id), ignore_errors=True)
