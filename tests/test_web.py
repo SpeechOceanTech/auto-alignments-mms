@@ -7,11 +7,11 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from alignment_web.app import create_app
+from alignment_web.app import _download_stem, create_app
 from alignment_web.auth import require_account
 
 
-async def call(app, method, path, body=b'', headers=()):
+async def call(app, method, path, body=b'', headers=(), include_headers=False):
     sent = []
     received = False
     async def receive():
@@ -32,6 +32,8 @@ async def call(app, method, path, body=b'', headers=()):
     await app(scope, receive, send)
     start = next(item for item in sent if item['type'] == 'http.response.start')
     content = b''.join(item.get('body', b'') for item in sent if item['type'] == 'http.response.body')
+    if include_headers:
+        return start['status'], content, dict(start['headers'])
     return start['status'], content
 
 
@@ -71,8 +73,8 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         await self.lifespan.__aexit__(None, None, None)
         self.temp.cleanup()
 
-    async def submit(self, language='en_us', audio=b'audio', text='one\ntwo'):
-        body, headers = form({'language': language, 'text': text}, [('audio','file.wav',audio)])
+    async def submit(self, language='en_us', audio=b'audio', text='one\ntwo', filename='file.wav'):
+        body, headers = form({'language': language, 'text': text}, [('audio', filename, audio)])
         status, data = await call(self.app, 'POST', '/v1/jobs', body, headers)
         return status, json.loads(data)
 
@@ -97,8 +99,9 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({p.name for p in directory.iterdir()}, {'normalized.wav', 'input.txt', 'output'})
         status, content = await call(self.app, 'GET', url + '/input/audio')
         self.assertEqual((status, content), (200, b'audio'))
-        status, content = await call(self.app, 'GET', url + '/artifacts/textgrid')
+        status, content, headers = await call(self.app, 'GET', url + '/artifacts/textgrid', include_headers=True)
         self.assertEqual((status, content), (200, b'textgrid'))
+        self.assertEqual(headers[b'content-disposition'], b'attachment; filename="file.TextGrid"')
         status, content = await call(self.app, 'GET', url + '/input/text')
         self.assertEqual((status, content), (200, b'one\ntwo'))
         status, content = await call(self.app, 'DELETE', url)
@@ -161,12 +164,42 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         status, content = await call(self.app, 'GET', '/v1/jobs/bulk-artifacts.zip?job_ids=' + completed['job_id'] + '&formats=csv,txt')
         self.assertEqual(status, 200)
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            self.assertEqual(set(archive.namelist()), {completed['job_id'] + '/result.csv', completed['job_id'] + '/result.txt'})
+            self.assertEqual(set(archive.namelist()), {'file.csv', 'file.txt'})
+        status, content = await call(self.app, 'GET', '/v1/jobs/bulk-artifacts.zip?job_ids=' + completed['job_id'])
+        self.assertEqual(status, 200)
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            self.assertEqual(archive.namelist(), ['file.csv'])
+        status, content = await call(self.app, 'GET', '/v1/jobs/bulk-artifacts.zip?job_ids=' + completed['job_id'] + '&formats=textgrid')
+        self.assertEqual(status, 200)
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            self.assertEqual(archive.namelist(), ['file.TextGrid'])
+        self.assertEqual((await call(self.app, 'GET', '/v1/jobs/bulk-artifacts.zip?job_ids=' + completed['job_id'] + '&formats=csv,invalid'))[0], 400)
+        self.assertEqual((await call(self.app, 'GET', '/v1/jobs/bulk-artifacts.zip?job_ids=' + failed['job_id']))[0], 409)
         status, _ = await call(self.app, 'POST', '/v1/jobs/' + completed['job_id'] + '/retry')
         self.assertEqual(status, 409)
         status, _ = await call(self.app, 'POST', '/v1/jobs/' + failed['job_id'] + '/retry')
         self.assertEqual(status, 200)
         self.assertEqual((await self.finished(failed['job_id']))['status'], 'failed')
+
+    async def test_download_names_original_audio_and_deduplicates_flat_archives(self):
+        self.assertEqual(_download_stem(r'..\目录\名称.v1.wav'), '名称.v1')
+        self.assertEqual(_download_stem('../folder/../../unsafe.wav'), 'unsafe')
+        self.assertEqual(_download_stem('bad:name?.wav'), 'bad_name_')
+        ids = []
+        for name in ('语音.片段.wav', '语音.片段.wav', '语音.片段_2.wav', 'recording.v1.wav'):
+            _, created = await self.submit(filename=name)
+            ids.append(created['job_id'])
+            await self.finished(ids[-1])
+        status, content, headers = await call(self.app, 'GET', f'/v1/jobs/{ids[0]}/artifacts/csv', include_headers=True)
+        self.assertEqual(status, 200)
+        self.assertIn(b"filename*=utf-8''%E8%AF%AD%E9%9F%B3.%E7%89%87%E6%AE%B5.csv", headers[b'content-disposition'])
+        status, content = await call(self.app, 'GET', '/v1/jobs/bulk-artifacts.zip?job_ids=' + ','.join(ids) + '&formats=csv,txt')
+        self.assertEqual(status, 200)
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            self.assertEqual(set(archive.namelist()), {
+                '语音.片段.csv', '语音.片段.txt', '语音.片段_2.csv', '语音.片段_2.txt',
+                '语音.片段_2_2.csv', '语音.片段_2_2.txt', 'recording.v1.csv', 'recording.v1.txt'})
+            self.assertEqual(len(archive.namelist()), 8)
 
     async def test_jobs_are_private_and_admin_can_view_legacy(self):
         _, created = await self.submit()

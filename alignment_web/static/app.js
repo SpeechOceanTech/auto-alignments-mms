@@ -119,7 +119,20 @@ $('#select-all').onchange = (e) => { for (const job of state.jobs) if (['complet
 async function removeJobs(ids) { if (!state.user?.is_admin) return; if (!confirm(`确定删除 ${ids.length} 个任务及其输入和结果文件？`)) return; let failed = 0; for (const id of ids) { try { await request(`/v1/jobs/${id}`, {method:'DELETE'}); state.selected.delete(id); } catch (_) { failed++; } } await refresh(); if (failed) $('#jobs-message').textContent = `${failed} 个任务删除失败。`; }
 async function retry(id) { try { await request(`/v1/jobs/${id}/retry`, {method:'POST'}); state.selected.delete(id); refresh(); } catch (e) { $('#jobs-message').textContent = e.message; } }
 $('#delete-selected').onclick = () => removeJobs([...state.selected.keys()]);
-$('#download-selected').onclick = () => { const ids = [...state.selected].filter(([, status]) => status === 'completed').map(([id]) => id); if (!ids.length) { $('#jobs-message').textContent = '请选择已完成的任务下载。'; return; } if (ids.length > 200) { $('#jobs-message').textContent = '每次最多下载 200 个任务。'; return; } const query = new URLSearchParams({job_ids:ids.join(','), formats:'csv,txt,textgrid'}); fetch(`/v1/jobs/bulk-artifacts.zip?${query}`).then(async response => { if (!response.ok) { let data = {}; try { data = await response.json(); } catch (_) {} throw new Error(data.detail || `下载失败 (${response.status})`); } return response.blob(); }).then(blob => { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'alignment-results.zip'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }).catch(error => { $('#jobs-message').textContent = error.message; }); };
+function selectedDownloadFormats() { return [...document.querySelectorAll('input[name="bulk-format"]:checked')].map(input => input.value); }
+function updateDownloadFormatSummary() { const formats = selectedDownloadFormats(); const labels = {csv:'CSV', textgrid:'TextGrid', txt:'TXT'}; $('#bulk-format-summary').textContent = `下载格式：${formats.length ? formats.map(format => labels[format]).join('、') : '未选择'}`; }
+for (const input of document.querySelectorAll('input[name="bulk-format"]')) input.addEventListener('change', updateDownloadFormatSummary);
+$('#download-selected').onclick = () => {
+  const ids = [...state.selected].filter(([, status]) => status === 'completed').map(([id]) => id);
+  if (!ids.length) { $('#jobs-message').textContent = '请选择已完成的任务下载。'; return; }
+  if (ids.length > 200) { $('#jobs-message').textContent = '每次最多下载 200 个任务。'; return; }
+  const formats = selectedDownloadFormats();
+  if (!formats.length) { $('#jobs-message').textContent = '请选择至少一种下载格式。'; $('#bulk-format-menu').open = true; return; }
+  $('#jobs-message').textContent = ''; $('#bulk-format-menu').open = false;
+  if (ids.length === 1 && formats.length === 1) { const a = document.createElement('a'); a.href = `/v1/jobs/${encodeURIComponent(ids[0])}/artifacts/${formats[0]}`; a.click(); return; }
+  const query = new URLSearchParams({job_ids:ids.join(','), formats:formats.join(',')});
+  fetch(`/v1/jobs/bulk-artifacts.zip?${query}`).then(async response => { if (!response.ok) { let data = {}; try { data = await response.json(); } catch (_) {} throw new Error(data.detail || `下载失败 (${response.status})`); } return response.blob(); }).then(blob => { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'alignment-results.zip'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }).catch(error => { $('#jobs-message').textContent = error.message; });
+};
 $('#refresh').onclick = async () => { await refresh(); if (state.user?.is_admin) await loadFilterUsers(state.user.id); }; $('#prev-page').onclick = () => { state.offset = Math.max(0, state.offset - state.limit); refresh(); }; $('#next-page').onclick = () => { state.offset += state.limit; refresh(); };
 let filterTimer; for (const id of ['filter-language','filter-status','filter-q','filter-from','filter-to','filter-owner']) $(`#${id}`).addEventListener('input', () => { clearTimeout(filterTimer); filterTimer = setTimeout(() => { state.offset = 0; state.selected.clear(); refresh(); }, 300); });
 $('#clear-filters').onclick = () => { for (const id of ['filter-language','filter-status','filter-q','filter-from','filter-to','filter-owner']) $(`#${id}`).value = ''; state.offset = 0; state.selected.clear(); refresh(); };

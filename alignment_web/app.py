@@ -34,6 +34,14 @@ FORMATS = {'csv': 'result.csv', 'textgrid': 'result.TextGrid', 'txt': 'result.tx
 STATIC_ROOT = Path(__file__).parent / 'static'
 
 
+def _download_stem(audio_name):
+    """Derive a safe, flat download name from the uploaded audio filename."""
+    basename = str(audio_name).replace('\\', '/').rsplit('/', 1)[-1]
+    stem = Path(basename).stem
+    stem = re.sub(r'[\x00-\x1f\x7f<>:"/\\|?*]', '_', stem).strip(' .')
+    return stem or 'audio'
+
+
 class LimitBody:
     """Limit multipart bodies before Starlette can spool an oversized request."""
     def __init__(self, app, max_bytes):
@@ -237,7 +245,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         return {'jobs': jobs, 'total': total, 'limit': limit, 'offset': offset}
 
     @app.get('/v1/jobs/bulk-artifacts.zip')
-    def bulk_artifacts(job_ids: str, formats: str = 'csv,textgrid,txt', user: dict = Depends(require_account)):
+    def bulk_artifacts(job_ids: str, formats: str = 'csv', user: dict = Depends(require_account)):
         ids = list(dict.fromkeys(part.strip() for part in job_ids.split(',') if part.strip()))
         selected = list(dict.fromkeys(part.strip().lower() for part in formats.split(',') if part.strip()))
         if not ids or len(ids) > 200:
@@ -245,15 +253,22 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         if not selected or any(kind not in FORMATS for kind in selected):
             raise HTTPException(400, '请选择有效的结果格式')
         files = []
+        used_stems = set()
         for job_id in ids:
             job = get_job(job_id, user)
             if job['status'] != 'completed':
                 raise HTTPException(409, '只能下载已完成的任务')
+            stem = _download_stem(job['audio_name'])
+            unique_stem, index = stem, 2
+            while unique_stem.casefold() in used_stems:
+                unique_stem = f'{stem}_{index}'
+                index += 1
+            used_stems.add(unique_stem.casefold())
             for kind in selected:
                 path = job_dir(job_id) / 'output' / FORMATS[kind]
                 if not path.is_file():
                     raise HTTPException(404, '结果文件不存在')
-                files.append((path, f'{job_id}/{FORMATS[kind]}'))
+                files.append((path, f'{unique_stem}{Path(FORMATS[kind]).suffix}'))
         temporary = tempfile.NamedTemporaryFile(prefix='alignment-export-', suffix='.zip', delete=False)
         temporary.close()
         try:
@@ -391,7 +406,8 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         path = job_dir(job_id) / 'output' / FORMATS[kind]
         if not path.is_file():
             raise HTTPException(404, '结果文件不存在')
-        return FileResponse(path, filename=FORMATS[kind], media_type='application/octet-stream')
+        return FileResponse(path, filename=f'{_download_stem(job["audio_name"])}{Path(FORMATS[kind]).suffix}',
+                            media_type='application/octet-stream')
 
     @app.delete('/v1/jobs/{job_id}')
     def delete_job(job_id: str, user: dict = Depends(require_account)):
