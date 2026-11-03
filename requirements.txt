@@ -1,0 +1,8 @@
+# Install matching PyTorch and torchaudio builds for your CPU/CUDA environment.
+# forced_align is required; it is removed in torchaudio 2.9.
+torch>=2.1,<2.9
+torchaudio>=2.1,<2.9
+fastapi>=0.100,<1
+uvicorn>=0.18,<1
+python-multipart>=0.0.6
+Unidecode>=1.3,<2

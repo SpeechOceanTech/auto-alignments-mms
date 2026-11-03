@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>长音频文本对齐</title><link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header><div><p class="eyebrow">MMS ALIGNMENT</p><h1>长音频文本对齐</h1><p>上传录音和逐句文本，生成带时间戳的对齐结果。</p></div><span class="badge">本地服务</span></header>
+<main>
+<div class="warning">此服务没有账号和身份验证。仅限可信环境使用，请勿直接暴露到公网。</div>
+<section class="card"><div class="section-title"><div><h2>新建对齐任务</h2><p>每行输入一句文本，顺序需与录音一致。</p></div></div>
+<form id="submit-form">
+<div class="columns"><label>音频文件<input name="audio" type="file" accept=".wav,.mp3,.flac,.m4a,.ogg,.opus,.aac,.webm" required><small>支持 WAV、MP3、FLAC 等格式</small></label><label>语种<input name="language" list="languages" value="cmn" required autocomplete="off"><datalist id="languages"></datalist><small>选择常用语种，或输入三位 ISO 639-3 代码</small></label></div>
+<label>文本文件 <span class="muted">（UTF-8，可选）</span><input name="text_file" id="text-file" type="file" accept=".txt,text/plain"><small>上传文本文件或在下方直接输入，二选一。</small></label>
+<label>逐句文本<textarea name="text" id="text" rows="7" placeholder="第一句文本&#10;第二句文本"></textarea></label>
+<div class="actions"><button type="submit" id="submit">提交任务 <span>→</span></button><span id="submit-message" role="status"></span></div>
+</form></section>
+<section class="card"><div class="section-title"><div><h2>任务记录</h2><p>任务状态会自动刷新。运行中的任务无法删除。</p></div><button class="secondary" id="refresh">刷新</button></div><div id="jobs" aria-live="polite"><p class="empty">正在加载…</p></div></section>
+</main><footer>输出包含 CSV、TextGrid 和文本文件 · 请核验对齐结果</footer>
+<script src="/static/app.js"></script></body></html>
