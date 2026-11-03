@@ -17,6 +17,7 @@ import tempfile
 import wave
 
 from alignment_languages import normalize_language
+from alignment_csv import write_audition_csv
 from alignment_support.text_normalization import text_normalize
 from alignment_vad import refine_times, speech_timestamps
 
@@ -202,11 +203,12 @@ def write_outputs(sentences, times, duration, output_dir):
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     paths = {"csv": output / "alignment.csv", "txt": output / "alignment.txt", "textgrid": output / "alignment.TextGrid"}
-    with paths["csv"].open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["id", "start", "end", "text"])
-        for (name, text), (start, end) in zip(sentences, times):
-            writer.writerow([name, f"{start:.3f}", f"{end:.3f}", text])
+    write_audition_csv(paths["csv"], [
+        # Match the original converter, which rounded both boundaries before
+        # calculating the marker duration.
+        {'id': name, 'start': round(start, 3), 'end': round(end, 3), 'text': text}
+        for (name, text), (start, end) in zip(sentences, times)
+    ])
     with paths["txt"].open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f, delimiter="\t", lineterminator="\n")
         writer.writerow(["id", "start", "end", "text"])

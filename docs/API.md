@@ -128,7 +128,7 @@ curl -H "Authorization: Bearer $ALIGN_API_KEY" "$BASE/v1/jobs/$JOB_ID"
 
 `duration` 为秒；`peaks` 是按时间均分的每段最小、最大采样幅度，归一化到约 `[-1, 1]`，实际段数不超过音频采样数。波形无法读取时返回 `422`。
 
-CSV 和 TXT 的 `start`、`end` 均为秒；TextGrid 包含 `sentences` 层。下载 CSV 示例：
+CSV 使用 Adobe Audition 标记格式：UTF-8、制表符分隔，列依次为 `Name`、`Start`、`Duration`、`Time Format`、`Type`、`Description`；`Start` 是开始时间，`Duration` 是持续时间，格式为 `时:分:秒.微秒`，`Time Format` 为 `decimal`，`Type` 为 `Cue`，`Description` 为句子原文。以前生成的任务在下载时也会转换成该格式。TXT 的 `start`、`end` 单位为秒；TextGrid 包含 `sentences` 层。下载 CSV 示例：
 
 ```bash
 curl -OJ -H "Authorization: Bearer $ALIGN_API_KEY" \

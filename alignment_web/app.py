@@ -1,6 +1,5 @@
 """Single-process HTTP service for authenticated alignment jobs."""
 import logging
-import csv
 import json
 import os
 import re
@@ -16,14 +15,16 @@ import zipfile
 from datetime import date
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from alignment_languages import COMMON_LANGUAGES, canonical_locale, normalize_language
+from alignment_csv import audition_csv_bytes, read_alignment_csv
 
 from .store import JobStore
 from .statistics import audio_duration, output_sentences
@@ -44,6 +45,22 @@ def _download_stem(audio_name):
     stem = Path(basename).stem
     stem = re.sub(r'[\x00-\x1f\x7f<>:"/\\|?*]', '_', stem).strip(' .')
     return stem or 'audio'
+
+
+def _audition_export(path):
+    """Produce the Audition-compatible format for both old and new jobs."""
+    try:
+        return audition_csv_bytes(read_alignment_csv(path))
+    except (OSError, UnicodeError, ValueError) as exc:
+        LOG.exception('Invalid CSV result: %s', path)
+        raise HTTPException(500, '对齐结果格式无效') from exc
+
+
+def _attachment_disposition(filename):
+    encoded = quote(filename)
+    if encoded != filename:
+        return f"attachment; filename*=utf-8''{encoded}"
+    return f'attachment; filename="{filename}"'
 
 
 class LimitBody:
@@ -334,7 +351,10 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         try:
             with zipfile.ZipFile(temporary.name, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
                 for path, archive_name in files:
-                    archive.write(path, archive_name)
+                    if path.suffix.lower() == '.csv':
+                        archive.writestr(archive_name, _audition_export(path))
+                    else:
+                        archive.write(path, archive_name)
         except BaseException:
             Path(temporary.name).unlink(missing_ok=True)
             raise
@@ -423,11 +443,8 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         if job['status'] != 'completed' or not path.is_file():
             raise HTTPException(404, '对齐结果不存在')
         try:
-            with path.open(encoding='utf-8-sig', newline='') as source:
-                return [{'id': row['id'], 'start': float(row['start']),
-                         'end': float(row['end']), 'text': row['text']}
-                        for row in csv.DictReader(source)]
-        except (KeyError, ValueError, csv.Error) as exc:
+            return read_alignment_csv(path)
+        except (OSError, UnicodeError, ValueError) as exc:
             LOG.exception('Invalid CSV result for job %s', job_id)
             raise HTTPException(500, '对齐结果格式无效') from exc
 
@@ -466,7 +483,11 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         path = job_dir(job_id) / 'output' / FORMATS[kind]
         if not path.is_file():
             raise HTTPException(404, '结果文件不存在')
-        return FileResponse(path, filename=f'{_download_stem(job["audio_name"])}{Path(FORMATS[kind]).suffix}',
+        filename = f'{_download_stem(job["audio_name"])}{Path(FORMATS[kind]).suffix}'
+        if kind == 'csv':
+            return Response(_audition_export(path), media_type='application/octet-stream',
+                            headers={'Content-Disposition': _attachment_disposition(filename)})
+        return FileResponse(path, filename=filename,
                             media_type='application/octet-stream')
 
     @app.delete('/v1/jobs/{job_id}')

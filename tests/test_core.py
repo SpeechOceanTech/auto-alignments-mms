@@ -35,7 +35,7 @@ class CoreTests(unittest.TestCase):
                 paths = align(audio, root / 'input.txt', 'zh_cn', root / 'output', already_converted=True)
             self.assertEqual(alignment.call_args.args[1], [list('nihaoshijiezaijian')])
             with paths['csv'].open(encoding='utf-8-sig', newline='') as f:
-                self.assertEqual(list(csv.reader(f))[1][3], original)
+                self.assertEqual(list(csv.reader(f, delimiter='\t'))[1][5], original)
             self.assertIn(original, paths['txt'].read_text(encoding='utf-8'))
             self.assertIn(f'text = "{original}"', paths['textgrid'].read_text(encoding='utf-8'))
 
@@ -50,9 +50,10 @@ class CoreTests(unittest.TestCase):
     def test_formats_preserve_text_and_gaps(self):
         with tempfile.TemporaryDirectory() as d:
             paths = write_outputs([('1', 'hello, "world"'), ('2', '你好')], [(0.5, 1.5), (2, 3)], 4, d)
-            with paths['csv'].open(encoding='utf-8-sig', newline='') as f:
-                rows = list(csv.reader(f))
-            self.assertEqual(rows[1], ['1', '0.500', '1.500', 'hello, "world"'])
+            with paths['csv'].open(encoding='utf-8', newline='') as f:
+                rows = list(csv.reader(f, delimiter='\t'))
+            self.assertEqual(rows[0], ['Name', 'Start', 'Duration', 'Time Format', 'Type', 'Description'])
+            self.assertEqual(rows[1], ['1', '00:00:00.500000', '00:00:01.000000', 'decimal', 'Cue', 'hello, "world"'])
             grid = paths['textgrid'].read_text(encoding='utf-8')
             self.assertIn('text = "hello, ""world"""', grid)
             self.assertIn('intervals: size = 5', grid)

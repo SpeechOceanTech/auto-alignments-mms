@@ -1,9 +1,10 @@
 """Read compact usage metadata from completed tasks without loading audio into memory."""
-import csv
 import math
 import subprocess
 import wave
 from pathlib import Path
+
+from alignment_csv import read_alignment_csv
 
 
 def audio_duration(path):
@@ -30,15 +31,6 @@ def audio_duration(path):
 
 def output_sentences(path):
     try:
-        with Path(path).open(encoding='utf-8-sig', newline='') as source:
-            rows = csv.DictReader(source)
-            if not rows.fieldnames or not {'id', 'start', 'end', 'text'} <= set(rows.fieldnames):
-                return None
-            count = 0
-            for row in rows:
-                if None in row or any(row.get(key) is None for key in ('id', 'start', 'end', 'text')):
-                    return None
-                count += 1
-            return count if count else None
-    except (OSError, UnicodeError, csv.Error):
+        return len(read_alignment_csv(path)) or None
+    except (OSError, UnicodeError, ValueError):
         return None

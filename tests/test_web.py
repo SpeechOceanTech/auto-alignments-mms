@@ -1,5 +1,6 @@
 """HTTP service tests with an in-process fake aligner, no model or GPU needed."""
 import asyncio
+import csv
 import json
 import io
 import tempfile
@@ -200,6 +201,52 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
                 '语音.片段.csv', '语音.片段.txt', '语音.片段_2.csv', '语音.片段_2.txt',
                 '语音.片段_2_2.csv', '语音.片段_2_2.txt', 'recording.v1.csv', 'recording.v1.txt'})
             self.assertEqual(len(archive.namelist()), 8)
+
+    async def test_audition_downloads_and_sentence_review_for_new_and_old_results(self):
+        ids = []
+        for filename in ('old.wav', 'new.wav'):
+            _, created = await self.submit(filename=filename)
+            ids.append(created['job_id'])
+            await self.finished(ids[-1])
+
+        old = ('\ufeffid,start,end,text\n'
+               'old-id,0.125,1.625,"你好, ""world"""\n').encode('utf-8')
+        new = ('Name\tStart\tDuration\tTime Format\tType\tDescription\n'
+               'new-id\t00:00:02.000000\t00:00:01.500000\tdecimal\tCue\t第二句\n').encode('utf-8')
+        output = Path(self.temp.name) / 'jobs'
+        for job_id, original in zip(ids, (old, new)):
+            (output / job_id / 'output' / 'result.csv').write_bytes(original)
+
+        expected = [
+            {'id': 'old-id', 'start': .125, 'end': 1.625, 'text': '你好, "world"'},
+            {'id': 'new-id', 'start': 2.0, 'end': 3.5, 'text': '第二句'},
+        ]
+        expected_rows = [
+            ['old-id', '00:00:00.125000', '00:00:01.500000', 'decimal', 'Cue', '你好, "world"'],
+            ['new-id', '00:00:02.000000', '00:00:01.500000', 'decimal', 'Cue', '第二句'],
+        ]
+        header = ['Name', 'Start', 'Duration', 'Time Format', 'Type', 'Description']
+
+        def check_csv(data, expected_row):
+            self.assertFalse(data.startswith(b'\xef\xbb\xbf'))
+            rows = list(csv.reader(io.StringIO(data.decode('utf-8'), newline=''), delimiter='\t'))
+            self.assertEqual(rows, [header, expected_row])
+
+        for job_id, sentence, row in zip(ids, expected, expected_rows):
+            status, content = await call(self.app, 'GET', f'/v1/jobs/{job_id}/sentences')
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(content), [sentence])
+            status, content = await call(self.app, 'GET', f'/v1/jobs/{job_id}/artifacts/csv')
+            self.assertEqual(status, 200)
+            check_csv(content, row)
+
+        status, content = await call(self.app, 'GET', '/v1/jobs/bulk-artifacts.zip?job_ids=' + ','.join(ids))
+        self.assertEqual(status, 200)
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            check_csv(archive.read('old.csv'), expected_rows[0])
+            check_csv(archive.read('new.csv'), expected_rows[1])
+        for job_id, original in zip(ids, (old, new)):
+            self.assertEqual((output / job_id / 'output' / 'result.csv').read_bytes(), original)
 
     async def test_jobs_are_private_and_admin_can_view_legacy(self):
         _, created = await self.submit()
