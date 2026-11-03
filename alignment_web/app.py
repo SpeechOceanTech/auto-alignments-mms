@@ -1,10 +1,13 @@
 """Single-process HTTP service for authenticated alignment jobs."""
 import logging
 import csv
+import json
 import os
 import re
 import shutil
 import stat
+import subprocess
+import sys
 import tempfile
 import threading
 import uuid
@@ -71,9 +74,26 @@ class LimitBody:
 
 
 def _default_runner(audio_path, text_path, language, output_dir):
-    from alignment_core import align
-    return align(audio_path, text_path, language, output_dir,
-                 already_converted=audio_path.name == 'normalized.wav')
+    # CUDA contexts remain allocated for the lifetime of a Python process, even
+    # after model objects and PyTorch's cache have been freed. Run each real job
+    # in its own process so its entire context is released before marking the
+    # job finished. Custom runners supplied to create_app remain in-process.
+    with tempfile.TemporaryDirectory(prefix='mms-align-result-') as temp:
+        result_file = Path(temp) / 'result.json'
+        command = [sys.executable, '-m', 'alignment_web.worker', str(audio_path),
+                   str(text_path), language, str(output_dir), str(result_file)]
+        with tempfile.TemporaryFile(mode='w+b') as errors:
+            process = subprocess.run(command, cwd=Path(__file__).resolve().parent.parent,
+                                     stderr=errors, check=False)
+            if process.returncode:
+                errors.seek(0, os.SEEK_END)
+                errors.seek(max(0, errors.tell() - 8000))
+                detail = errors.read().decode('utf-8', errors='replace').strip()
+                raise RuntimeError(detail[-2000:] or f'对齐进程异常退出（状态码 {process.returncode}）')
+        try:
+            return json.loads(result_file.read_text(encoding='utf-8'))
+        except (OSError, ValueError) as exc:
+            raise RuntimeError('对齐进程未返回有效结果') from exc
 
 
 def _default_converter(audio_path, destination):
