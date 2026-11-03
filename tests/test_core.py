@@ -24,6 +24,29 @@ class CoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'no alignable characters'):
             romanize([('a', '。')], 'cmn')
 
+    def test_bracket_annotations_are_excluded_only_from_alignment(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            audio = root / 'audio.wav'
+            audio.write_bytes(b'fixture')
+            original = '你好【笑声】世界！【背景音乐】再见。'
+            (root / 'input.txt').write_text(f'line-1\t{original}\n', encoding='utf-8')
+            with patch('alignment_core._alignment', return_value=([(0.1, 1.0)], 1.2)) as alignment, patch('alignment_core.speech_timestamps', return_value=[(0.1, 1.0)]):
+                paths = align(audio, root / 'input.txt', 'zh_cn', root / 'output', already_converted=True)
+            self.assertEqual(alignment.call_args.args[1], [list('nihaoshijiezaijian')])
+            with paths['csv'].open(encoding='utf-8-sig', newline='') as f:
+                self.assertEqual(list(csv.reader(f))[1][3], original)
+            self.assertIn(original, paths['txt'].read_text(encoding='utf-8'))
+            self.assertIn(f'text = "{original}"', paths['textgrid'].read_text(encoding='utf-8'))
+
+    def test_bracket_only_sentence_rejected_with_correct_index(self):
+        with self.assertRaisesRegex(ValueError, 'Sentence 2 has no alignable characters'):
+            romanize([('1', 'Hello!'), ('2', '【笑声】！？')], 'eng')
+
+    def test_other_bracket_types_keep_their_text_for_alignment(self):
+        self.assertEqual(romanize([('1', 'Hello (world), [again] 【ignored】!')], 'eng'),
+                         [list('helloworldagain')])
+
     def test_formats_preserve_text_and_gaps(self):
         with tempfile.TemporaryDirectory() as d:
             paths = write_outputs([('1', 'hello, "world"'), ('2', '你好')], [(0.5, 1.5), (2, 3)], 4, d)

@@ -8,12 +8,13 @@ import stat
 import tempfile
 import threading
 import uuid
+import wave
 import zipfile
 from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
@@ -222,7 +223,14 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
                                  str(created_to) if created_to else None,
                                  owner_id=None if user['is_admin'] else user['id'],
                                  legacy_language=legacy_language)
-        return {'jobs': [get_job(job['id'], user) for job in jobs], 'total': total, 'limit': limit, 'offset': offset}
+        jobs = [get_job(job['id'], user) for job in jobs]
+        if user['is_admin']:
+            owners = {job['owner_id'] for job in jobs if job['owner_id']}
+            usernames = app.state.auth_store.usernames_for_ids(owners) if app.state.auth_store else {}
+            for job in jobs:
+                owner = job['owner_id']
+                job['owner_username'] = usernames.get(owner, '未知用户') if owner else '历史任务'
+        return {'jobs': jobs, 'total': total, 'limit': limit, 'offset': offset}
 
     @app.get('/v1/jobs/bulk-artifacts.zip')
     def bulk_artifacts(job_ids: str, formats: str = 'csv,textgrid,txt', user: dict = Depends(require_account)):
@@ -357,6 +365,20 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
             raise HTTPException(404, '输入文件不存在')
         return FileResponse(path, media_type='text/plain; charset=utf-8' if kind == 'text' else None)
 
+    @app.get('/v1/jobs/{job_id}/waveform')
+    def job_waveform(job_id: str, points: int = Query(4000, ge=1, le=48000),
+                     user: dict = Depends(require_account)):
+        job = get_job(job_id, user)
+        path = job_audio(job)
+        if not path.is_file():
+            raise HTTPException(404, '音频文件不存在')
+        try:
+            from .waveform import waveform
+            return waveform(path, points)
+        except (ValueError, OSError, EOFError, wave.Error) as exc:
+            LOG.warning('Cannot read waveform for job %s: %s', job_id, exc)
+            raise HTTPException(422, '无法读取音频波形') from exc
+
     @app.get('/v1/jobs/{job_id}/artifacts/{kind}')
     def artifact(job_id: str, kind: str, user: dict = Depends(require_account)):
         job = get_job(job_id, user)
@@ -370,6 +392,8 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
     @app.delete('/v1/jobs/{job_id}')
     def delete_job(job_id: str, user: dict = Depends(require_account)):
         job = get_job(job_id, user)
+        if not user['is_admin']:
+            raise HTTPException(403, '只有管理员可以删除任务')
         if not store.delete(job_id):
             raise HTTPException(409, '排队中或运行中的任务不能删除')
         shutil.rmtree(job_dir(job_id), ignore_errors=True)

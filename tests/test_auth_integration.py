@@ -39,6 +39,8 @@ class AccountJobIntegrationTest(unittest.TestCase):
 
                 alice_headers = login(alice, 'alice@dataoceanai.com')
                 bob_headers = login(bob, 'bob@dataoceanai.com')
+                admin = TestClient(app)
+                admin_headers = login(admin, 'duhu@dataoceanai.com')
                 files = {'audio': ('speech.wav', b'audio', 'audio/wav')}
                 form = {'language': '中文', 'text': '你好'}
                 self.assertEqual(alice.post('/v1/jobs', data=form, files=files).status_code, 403)
@@ -53,6 +55,8 @@ class AccountJobIntegrationTest(unittest.TestCase):
                 self.assertEqual(job['status'], 'completed')
                 self.assertEqual(job['language'], 'zh_cn')
                 self.assertEqual(bob.get('/v1/jobs').json()['total'], 0)
+                self.assertNotIn('owner_username', alice.get('/v1/jobs').json()['jobs'][0])
+                self.assertEqual(admin.get('/v1/jobs').json()['jobs'][0]['owner_username'], 'alice')
                 key = alice.post('/api/auth/api-keys', json={'name': 'test'}, headers=alice_headers)
                 self.assertEqual(key.status_code, 200)
                 token = key.json()['token']
@@ -64,7 +68,9 @@ class AccountJobIntegrationTest(unittest.TestCase):
                     self.assertEqual(bob.get('/v1/jobs/' + job_id + suffix).status_code, 404)
                 self.assertEqual(bob.delete('/v1/jobs/' + job_id, headers=bob_headers).status_code, 404)
                 self.assertEqual(alice.delete('/v1/jobs/' + job_id).status_code, 403)
-                self.assertEqual(alice.delete('/v1/jobs/' + job_id, headers=alice_headers).status_code, 200)
+                self.assertEqual(alice.delete('/v1/jobs/' + job_id, headers=alice_headers).status_code, 403)
+                self.assertEqual(api.delete('/v1/jobs/' + job_id, headers=bearer).status_code, 403)
+                self.assertEqual(admin.delete('/v1/jobs/' + job_id, headers=admin_headers).status_code, 200)
                 self.assertEqual(alice.delete('/api/auth/api-keys/' + key.json()['key']['id'], headers=alice_headers).status_code, 200)
                 self.assertEqual(api.get('/v1/jobs', headers=bearer).status_code, 401)
 

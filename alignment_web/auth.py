@@ -83,6 +83,15 @@ class AuthStore:
         db.execute('PRAGMA foreign_keys=ON')
         return db
 
+    def usernames_for_ids(self, ids):
+        ids = list(set(ids))
+        if not ids:
+            return {}
+        placeholders = ','.join('?' for _ in ids)
+        with self.connect() as db:
+            rows = db.execute(f'SELECT id, username FROM users WHERE id IN ({placeholders})', ids)
+            return {row['id']: row['username'] for row in rows}
+
     def digest(self, purpose, value):
         return hmac.new(self.secret, (purpose + '\0' + value).encode(), hashlib.sha256).hexdigest()
 

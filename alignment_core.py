@@ -46,7 +46,13 @@ def read_sentences(path):
 
 
 def romanize(sentences, language):
-    normal = [text_normalize(text, language) for _, text in sentences]
+    # Bracketed annotations are metadata, not spoken words. Keep `sentences`
+    # untouched so result files and the review page retain the original text.
+    normal = [text_normalize(re.sub(r"【[^】]*】", " ", text), language)
+              for _, text in sentences]
+    for i, line in enumerate(normal):
+        if not line.strip():
+            raise ValueError(f"Sentence {i + 1} has no alignable characters after normalization")
     root = Path(os.environ.get("UROMAN_PATH", ROOT / "vendor/uroman/bin"))
     script = root / "uroman.pl"
     if not script.is_file():

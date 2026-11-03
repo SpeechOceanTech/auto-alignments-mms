@@ -45,15 +45,27 @@
           <div class="field"><label for="filter-from">开始日期</label><input id="filter-from" type="date"></div><div class="field"><label for="filter-to">结束日期</label><input id="filter-to" type="date"></div>
           <button id="clear-filters" class="outline" type="button">清除</button>
         </div>
-        <div class="jobs-table-wrap"><table><thead><tr><th><input id="select-all" type="checkbox" aria-label="选择所有任务"></th><th>文件</th><th>语种</th><th>创建时间</th><th>任务 ID</th><th>状态</th><th>操作 / 下载</th></tr></thead><tbody id="jobs"></tbody></table></div>
+        <div class="jobs-table-wrap"><table><thead><tr><th><input id="select-all" type="checkbox" aria-label="选择所有任务"></th><th>文件</th><th>语种</th><th id="job-user-header" hidden>用户名</th><th>创建时间</th><th>任务 ID</th><th>状态</th><th>操作 / 下载</th></tr></thead><tbody id="jobs"></tbody></table></div>
         <div class="pager"><button id="prev-page" class="outline" type="button">上一页</button><span id="page-info">0–0 / 0</span><button id="next-page" class="outline" type="button">下一页</button></div>
         <p id="jobs-message" class="message" role="status"></p>
       </section>
-      <section id="review" class="review" hidden><div class="toolbar"><h2 id="review-title">任务详情</h2><button id="close-review" class="outline" type="button">关闭</button></div><div class="review-grid"><div><audio id="review-audio" controls preload="none"></audio><h3>输入文本</h3><pre id="review-input"></pre></div><div><h3>对齐结果 <small>点击句子跳转播放位置</small></h3><div id="segment-list" class="segment-list"></div></div></div></section>
+      <section id="review" class="review" hidden>
+        <div class="toolbar"><h2 id="review-title">任务详情</h2><button id="close-review" class="outline" type="button">关闭</button></div>
+        <div class="review-content">
+          <audio id="review-audio" controls preload="metadata"></audio>
+          <div class="wave-tools"><label for="wave-zoom">波形缩放 <output id="wave-zoom-value">1×</output></label><input id="wave-zoom" type="range" min="1" max="48" value="1" aria-label="波形缩放"><span>可视范围 <span id="wave-visible">--:-- – --:--</span></span><span>滚轮缩放，拖动平移，点击跳转</span></div>
+          <canvas id="waveform" class="waveform" height="220" role="img" aria-label="音频波形和分句时间区间"></canvas>
+          <p id="wave-message" class="message" role="status">正在加载波形…</p>
+          <h3>对齐结果 <small>点击句子播放该句</small></h3>
+          <div class="segment-list"><table class="segment-table"><thead><tr><th>ID</th><th>开始时间</th><th>结束时间</th><th>文本</th></tr></thead><tbody id="segment-list"></tbody></table></div>
+          <details><summary>输入文本</summary><pre id="review-input"></pre></details>
+        </div>
+      </section>
     </div>
     <section id="api-keys-panel" class="admin-panel" hidden><div class="toolbar"><h2>API 密钥</h2><button id="refresh-api-keys" class="outline" type="button">刷新</button></div><div class="api-key-content"><p>使用密钥在 API 请求中携带 <code>Authorization: Bearer &lt;密钥&gt;</code>。密钥只在创建时显示一次，请妥善保存。</p><form id="api-key-form" class="api-key-form"><div class="field"><label for="api-key-name">密钥名称</label><input id="api-key-name" maxlength="100" required placeholder="例如：我的脚本"></div><button id="api-key-create" type="submit">创建密钥</button></form><div id="new-api-key" class="new-api-key" hidden><strong>请立即复制密钥；关闭或离开此页面后将无法再次查看。</strong><div class="api-key-secret-row"><input id="api-key-secret" readonly aria-label="新创建的 API 密钥"><button id="copy-api-key" class="outline" type="button">复制</button><button id="close-api-key" class="outline" type="button">关闭</button></div></div><div id="api-key-list"></div><p id="api-key-message" class="message" role="status"></p></div></section>
     <section id="admin-accounts" class="admin-panel" hidden><div class="toolbar"><h2>账号管理</h2><button id="refresh-users" class="outline" type="button">刷新</button></div><p class="admin-description">管理已登录用户的状态和管理员权限。</p><div id="user-list"></div><p id="admin-message" class="message" role="status"></p></section>
   </main>
+  <script src="/static/waveform.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

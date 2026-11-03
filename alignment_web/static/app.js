@@ -4,7 +4,7 @@ let languageChoices = [];
 const state = {csrf: '', user: null, offset: 0, limit: 20, total: 0, jobs: [], selected: new Map()};
 function node(tag, text, cls) { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (cls) el.className = cls; return el; }
 function action(text, callback, cls = '') { const el = node('button', text, `text-button ${cls}`); el.type = 'button'; el.onclick = callback; return el; }
-function formatTime(seconds) { if (!Number.isFinite(Number(seconds))) return '--:--'; const n = Math.max(0, Number(seconds)); const hours = Math.floor(n / 3600); const minutes = Math.floor(n % 3600 / 60); return `${hours ? `${hours}:` : ''}${String(minutes).padStart(2, '0')}:${(n % 60).toFixed(2).padStart(5, '0')}`; }
+function formatTime(seconds) { if (!Number.isFinite(Number(seconds))) return '--:--'; const ms = Math.round(Math.max(0, Number(seconds)) * 1000); const hours = Math.floor(ms / 3600000); const minutes = Math.floor(ms % 3600000 / 60000); const remainder = (ms % 60000 / 1000).toFixed(3).padStart(6, '0'); return `${hours ? `${hours}:` : ''}${String(minutes).padStart(2, '0')}:${remainder}`; }
 function formatDate(value) { if (value == null) return ''; const input = typeof value === 'number' ? value * 1000 : (!/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value.replace(' ', 'T') + 'Z' : value); const d = new Date(input); return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString(); }
 async function request(url, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -18,8 +18,8 @@ function showAccount(user, csrf = '') {
   state.user = user; state.csrf = csrf;
   $('#account-panel').hidden = !!user; $('#workspace').hidden = !user; $('#logout').hidden = !user;
   $('#account-label').textContent = user ? (user.username || user.email) : '';
-  $('#admin-navigation').hidden = !user; $('#tab-accounts').hidden = !user?.is_admin;
-  if (!user) { state.selected.clear(); $('#review').hidden = true; $('#account-code').value = ''; hideNewKey(); switchTab('details'); }
+  $('#admin-navigation').hidden = !user; $('#tab-accounts').hidden = !user?.is_admin; $('#delete-selected').hidden = !user?.is_admin; $('#job-user-header').hidden = !user?.is_admin;
+  if (!user) { state.selected.clear(); closeReview(); $('#account-code').value = ''; hideNewKey(); switchTab('details'); }
 }
 async function checkSession() {
   try { const data = await request('/api/auth/me'); showAccount(data.user, data.csrf_token); if (data.user) { loadLanguages(); refresh(); } }
@@ -56,22 +56,78 @@ function setupLanguagePicker(inputId, optionsId) {
 setupLanguagePicker('#language', '#language-options'); setupLanguagePicker('#filter-language', '#filter-language-options');
 function filters() { const query = new URLSearchParams({limit: state.limit, offset: state.offset}); for (const [id, name] of [['filter-language','language'], ['filter-status','status'], ['filter-q','q'], ['filter-from','created_from'], ['filter-to','created_to']]) { const value = $(`#${id}`).value.trim(); if (value) query.set(name, value); } return query; }
 function updateSelection() { const selectable = state.jobs.filter(j => j.status === 'completed' || j.status === 'failed'); const checked = selectable.filter(j => state.selected.has(j.id)); $('#select-all').checked = !!selectable.length && checked.length === selectable.length; $('#select-all').indeterminate = !!checked.length && checked.length < selectable.length; $('#delete-selected').disabled = !state.selected.size; $('#download-selected').disabled = !state.selected.size; $('#selection-count').textContent = state.selected.size ? `已选 ${state.selected.size} 项` : '';  }
+let copyMessageUntil = 0;
+async function copyText(value) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try { await navigator.clipboard.writeText(value); return; } catch (_) { /* Fall back when browser permissions deny access. */ }
+  }
+  const previous = document.activeElement;
+  const input = document.createElement('textarea'); input.value = value; input.setAttribute('readonly', '');
+  input.style.cssText = 'position:fixed;left:-9999px;top:0'; document.body.append(input);
+  try { input.focus(); input.select(); if (!document.execCommand('copy')) throw new Error('copy failed'); }
+  finally { input.remove(); if (previous && typeof previous.focus === 'function') previous.focus(); }
+}
+async function copyJobId(id) {
+  copyMessageUntil = Date.now() + 5000;
+  try { await copyText(id); $('#jobs-message').textContent = `已复制完整任务 ID：${id}`; }
+  catch (_) { $('#jobs-message').textContent = `复制失败，请手动复制完整任务 ID：${id}`; }
+}
 function renderJob(job) {
   const row = node('tr'); const selection = node('td'); const check = node('input'); check.type = 'checkbox'; check.setAttribute('aria-label', `选择 ${job.audio_name}`); check.disabled = !['completed', 'failed'].includes(job.status); check.checked = state.selected.has(job.id); check.onchange = () => { if (check.checked) state.selected.set(job.id, job.status); else state.selected.delete(job.id); updateSelection(); }; selection.append(check); row.append(selection);
-  const name = node('td', job.audio_name, 'file-name'); if (job.error) { const error = node('div', job.error, 'error'); name.append(error); } row.append(name, node('td', job.language), node('td', formatDate(job.created_at)), node('td', job.id.slice(0, 8), 'job-id')); row.lastChild.title = job.id;
+  const name = node('td', job.audio_name, 'file-name'); if (job.error) { const error = node('div', job.error, 'error'); name.append(error); } row.append(name, node('td', job.language)); if (state.user?.is_admin) row.append(node('td', job.owner_username || '—')); row.append(node('td', formatDate(job.created_at))); const idCell = node('td', undefined, 'job-id'); const idButton = action(job.id.slice(0, 8), () => copyJobId(job.id), 'job-id-button'); idButton.title = `点击复制完整任务 ID：${job.id}`; idButton.setAttribute('aria-label', `复制完整任务 ID ${job.id}`); idCell.append(idButton); row.append(idCell);
   const status = node('td'); status.append(node('span', statusNames[job.status] || job.status, `status ${job.status}`)); row.append(status);
-  const cell = node('td'); const actions = node('div', undefined, 'row-actions'); actions.append(action('查看', () => showReview(job))); for (const format of job.artifacts || []) { const a = node('a', format.toUpperCase()); a.href = `/v1/jobs/${job.id}/artifacts/${format}`; actions.append(a); } if (job.status === 'failed') actions.append(action('重试', () => retry(job.id))); if (['completed', 'failed'].includes(job.status)) actions.append(action('删除', () => removeJobs([job.id]), 'danger')); cell.append(actions); row.append(cell); return row;
+  const cell = node('td'); const actions = node('div', undefined, 'row-actions'); actions.append(action('查看', () => showReview(job))); for (const format of job.artifacts || []) { const a = node('a', format.toUpperCase()); a.href = `/v1/jobs/${job.id}/artifacts/${format}`; actions.append(a); } if (job.status === 'failed') actions.append(action('重试', () => retry(job.id))); if (state.user?.is_admin && ['completed', 'failed'].includes(job.status)) actions.append(action('删除', () => removeJobs([job.id]), 'danger')); cell.append(actions); row.append(cell); return row;
 }
-async function refresh() { if (!state.user) return; try { const data = await request(`/v1/jobs?${filters()}`); state.jobs = data.jobs; state.total = data.total; if (!data.jobs.length && state.offset > 0) { state.offset = Math.max(0, state.offset - state.limit); return refresh(); } $('#jobs').replaceChildren(...data.jobs.map(renderJob)); if (!data.jobs.length) { const row = node('tr'); const cell = node('td', '暂无任务', 'empty'); cell.colSpan = 7; row.append(cell); $('#jobs').append(row); } $('#page-info').textContent = `${data.total ? state.offset + 1 : 0}–${state.offset + data.jobs.length} / ${data.total}`; $('#prev-page').disabled = state.offset === 0; $('#next-page').disabled = state.offset + data.jobs.length >= data.total; updateSelection(); $('#jobs-message').textContent = ''; } catch (e) { $('#jobs-message').textContent = e.message; } }
+async function refresh() { if (!state.user) return; try { const data = await request(`/v1/jobs?${filters()}`); state.jobs = data.jobs; state.total = data.total; if (!data.jobs.length && state.offset > 0) { state.offset = Math.max(0, state.offset - state.limit); return refresh(); } $('#jobs').replaceChildren(...data.jobs.map(renderJob)); if (!data.jobs.length) { const row = node('tr'); const cell = node('td', '暂无任务', 'empty'); cell.colSpan = state.user?.is_admin ? 8 : 7; row.append(cell); $('#jobs').append(row); } $('#page-info').textContent = `${data.total ? state.offset + 1 : 0}–${state.offset + data.jobs.length} / ${data.total}`; $('#prev-page').disabled = state.offset === 0; $('#next-page').disabled = state.offset + data.jobs.length >= data.total; updateSelection(); if (Date.now() >= copyMessageUntil) $('#jobs-message').textContent = ''; } catch (e) { $('#jobs-message').textContent = e.message; } }
 $('#select-all').onchange = (e) => { for (const job of state.jobs) if (['completed', 'failed'].includes(job.status)) { if (e.target.checked) state.selected.set(job.id, job.status); else state.selected.delete(job.id); } refresh(); };
-async function removeJobs(ids) { if (!confirm(`确定删除 ${ids.length} 个任务及其输入和结果文件？`)) return; let failed = 0; for (const id of ids) { try { await request(`/v1/jobs/${id}`, {method:'DELETE'}); state.selected.delete(id); } catch (_) { failed++; } } await refresh(); if (failed) $('#jobs-message').textContent = `${failed} 个任务删除失败。`; }
+async function removeJobs(ids) { if (!state.user?.is_admin) return; if (!confirm(`确定删除 ${ids.length} 个任务及其输入和结果文件？`)) return; let failed = 0; for (const id of ids) { try { await request(`/v1/jobs/${id}`, {method:'DELETE'}); state.selected.delete(id); } catch (_) { failed++; } } await refresh(); if (failed) $('#jobs-message').textContent = `${failed} 个任务删除失败。`; }
 async function retry(id) { try { await request(`/v1/jobs/${id}/retry`, {method:'POST'}); state.selected.delete(id); refresh(); } catch (e) { $('#jobs-message').textContent = e.message; } }
 $('#delete-selected').onclick = () => removeJobs([...state.selected.keys()]);
 $('#download-selected').onclick = () => { const ids = [...state.selected].filter(([, status]) => status === 'completed').map(([id]) => id); if (!ids.length) { $('#jobs-message').textContent = '请选择已完成的任务下载。'; return; } if (ids.length > 200) { $('#jobs-message').textContent = '每次最多下载 200 个任务。'; return; } const query = new URLSearchParams({job_ids:ids.join(','), formats:'csv,txt,textgrid'}); fetch(`/v1/jobs/bulk-artifacts.zip?${query}`).then(async response => { if (!response.ok) { let data = {}; try { data = await response.json(); } catch (_) {} throw new Error(data.detail || `下载失败 (${response.status})`); } return response.blob(); }).then(blob => { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'alignment-results.zip'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }).catch(error => { $('#jobs-message').textContent = error.message; }); };
 $('#refresh').onclick = refresh; $('#prev-page').onclick = () => { state.offset = Math.max(0, state.offset - state.limit); refresh(); }; $('#next-page').onclick = () => { state.offset += state.limit; refresh(); };
 let filterTimer; for (const id of ['filter-language','filter-status','filter-q','filter-from','filter-to']) $(`#${id}`).addEventListener('input', () => { clearTimeout(filterTimer); filterTimer = setTimeout(() => { state.offset = 0; state.selected.clear(); refresh(); }, 300); });
 $('#clear-filters').onclick = () => { for (const id of ['filter-language','filter-status','filter-q','filter-from','filter-to']) $(`#${id}`).value = ''; state.offset = 0; state.selected.clear(); refresh(); };
-async function showReview(job) { $('#review').hidden = false; $('#review-title').textContent = `任务详情：${job.audio_name}`; const audio = $('#review-audio'); audio.src = `/v1/jobs/${job.id}/input/audio`; $('#review-input').textContent = '正在加载…'; $('#segment-list').replaceChildren(node('p', job.status === 'completed' ? '正在加载…' : '任务尚未完成')); $('#review').scrollIntoView({behavior:'smooth',block:'start'}); try { const response = await fetch(`/v1/jobs/${job.id}/input/text`); if (!response.ok) throw new Error('无法加载输入文本'); $('#review-input').textContent = await response.text(); } catch(e) { $('#review-input').textContent = e.message; } if (job.status === 'completed') { try { const data = await request(`/v1/jobs/${job.id}/sentences`); const sentences = Array.isArray(data) ? data : data.sentences; $('#segment-list').replaceChildren(...sentences.map(segment => { const el = node('button', undefined, 'segment'); el.type = 'button'; el.append(node('time', `${formatTime(segment.start)} – ${formatTime(segment.end)}`), node('span', segment.text)); el.onclick = () => { audio.currentTime = segment.start; audio.play().catch(() => {}); }; return el; })); if (!sentences.length) $('#segment-list').textContent = '暂无句子'; } catch(e) { $('#segment-list').textContent = e.message; } } }
-$('#close-review').onclick = () => { $('#review-audio').pause(); $('#review').hidden = true; };
+const reviewAudio = $('#review-audio');
+const waveform = new WaveformReview($('#waveform'), reviewAudio, $('#wave-zoom'), $('#wave-zoom-value'), $('#wave-visible'), formatTime);
+let reviewEpoch = 0, reviewSegments = [], reviewRows = [], activeRow = -1, playUntil = null, playTimer = null;
+function clearPlayUntil() { playUntil = null; clearTimeout(playTimer); playTimer = null; }
+function stopAtSegmentEnd() {
+  clearTimeout(playTimer);
+  if (playUntil === null || reviewAudio.paused) return;
+  const remaining = playUntil - reviewAudio.currentTime;
+  if (remaining <= 0) { reviewAudio.pause(); reviewAudio.currentTime = playUntil; clearPlayUntil(); }
+  else playTimer = setTimeout(stopAtSegmentEnd, Math.max(10, remaining / (reviewAudio.playbackRate || 1) * 1000));
+}
+function updateReviewPlayback() {
+  const next = WaveformMath.activeSegment(reviewSegments, reviewAudio.currentTime);
+  if (next !== activeRow) { if (reviewRows[activeRow]) reviewRows[activeRow].classList.remove('active'); activeRow = next; if (reviewRows[next]) reviewRows[next].classList.add('active'); }
+  waveform.showTime(reviewAudio.currentTime); waveform.draw(); stopAtSegmentEnd();
+}
+for (const event of ['timeupdate', 'seeked', 'play', 'pause', 'ratechange']) reviewAudio.addEventListener(event, updateReviewPlayback);
+waveform.onSeek = time => { clearPlayUntil(); reviewAudio.currentTime = time; waveform.draw(); };
+function closeReview() { reviewEpoch++; clearPlayUntil(); reviewAudio.pause(); reviewAudio.removeAttribute('src'); reviewAudio.load(); $('#review').hidden = true; waveform.reset(); }
+async function showReview(job) {
+  const epoch = ++reviewEpoch, current = () => epoch === reviewEpoch;
+  clearPlayUntil(); reviewAudio.pause(); reviewSegments = []; reviewRows = []; activeRow = -1;
+  $('#review').hidden = false; $('#review-title').textContent = `任务详情：${job.audio_name}`;
+  reviewAudio.src = `/v1/jobs/${job.id}/input/audio`; waveform.reset();
+  $('#wave-message').textContent = '正在加载波形…'; $('#review-input').textContent = '正在加载…';
+  const list = $('#segment-list'); list.replaceChildren();
+  function listMessage(message) { const row = node('tr'), cell = node('td', message, 'empty'); cell.colSpan = 4; row.append(cell); list.replaceChildren(row); }
+  listMessage(job.status === 'completed' ? '正在加载…' : '任务尚未完成');
+  $('#review').scrollIntoView({behavior:'smooth',block:'start'});
+  fetch(`/v1/jobs/${job.id}/input/text`).then(response => { if (!response.ok) throw new Error('无法加载输入文本'); return response.text(); }).then(text => { if (current()) $('#review-input').textContent = text; }).catch(error => { if (current()) $('#review-input').textContent = error.message; });
+  request(`/v1/jobs/${job.id}/waveform?points=48000`).then(data => { if (!current()) return; waveform.setData(data); $('#wave-message').textContent = data.peaks?.length ? '' : '暂无波形数据'; }).catch(error => { if (current()) $('#wave-message').textContent = `波形加载失败：${error.message}`; });
+  if (job.status !== 'completed') return;
+  try {
+    const data = await request(`/v1/jobs/${job.id}/sentences`); if (!current()) return;
+    reviewSegments = Array.isArray(data) ? data : data.sentences; waveform.setSegments(reviewSegments);
+    reviewRows = reviewSegments.map(segment => { const row = node('tr'); row.tabIndex = 0; row.setAttribute('role', 'button'); row.setAttribute('aria-label', `播放第 ${segment.id} 句`); row.append(node('td', String(segment.id)), node('td', formatTime(segment.start)), node('td', formatTime(segment.end)), node('td', segment.text));
+      const play = () => { clearPlayUntil(); reviewAudio.currentTime = Number(segment.start); playUntil = Number(segment.end); reviewAudio.play().then(stopAtSegmentEnd).catch(() => { clearPlayUntil(); }); };
+      row.onclick = play; row.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); play(); } }; return row; });
+    list.replaceChildren(...reviewRows); if (!reviewRows.length) listMessage('暂无句子'); updateReviewPlayback();
+  } catch(error) { if (current()) listMessage(error.message); }
+}
+$('#close-review').onclick = closeReview;
 $('#submit-form').addEventListener('submit', (event) => { event.preventDefault(); const file = $('#text-file').files.length, text = $('#text').value.trim(); if ((!file && !text) || (file && text)) { $('#submit-message').textContent = file ? '请只使用一种文本输入方式' : '请输入文本或选择文本文件'; return; } const body = new FormData(event.currentTarget); if (!file) body.delete('text_file'); const xhr = new XMLHttpRequest(); xhr.open('POST', '/v1/jobs'); if (state.csrf) xhr.setRequestHeader('X-CSRF-Token', state.csrf); $('#submit').disabled = true; $('#upload-progress').hidden = false; $('#upload-progress-bar').style.width = '0%'; $('#upload-progress-text').textContent = '正在上传…'; xhr.upload.onprogress = (e) => { if (e.lengthComputable) { const pct = Math.round(e.loaded / e.total * 100); $('#upload-progress-bar').style.width = `${pct}%`; $('#upload-progress-text').textContent = `上传中 ${pct}%`; } }; xhr.onload = () => { let data = {}; try { data = JSON.parse(xhr.responseText); } catch (_) {} if (xhr.status >= 200 && xhr.status < 300) { $('#submit-message').textContent = `已提交：${data.job_id}`; event.target.reset(); state.offset = 0; refresh(); } else { $('#submit-message').textContent = typeof data.detail === 'string' ? data.detail : `提交失败 (${xhr.status})`; if (xhr.status === 401) showAccount(null); } $('#submit').disabled = false; $('#upload-progress').hidden = true; }; xhr.onerror = () => { $('#submit-message').textContent = '上传失败，请检查网络'; $('#submit').disabled = false; $('#upload-progress').hidden = true; }; xhr.send(body); });
 health(); checkSession(); setInterval(() => { health(); refresh(); }, 5000);

@@ -102,6 +102,9 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         status, content = await call(self.app, 'GET', url + '/input/text')
         self.assertEqual((status, content), (200, b'one\ntwo'))
         status, content = await call(self.app, 'DELETE', url)
+        self.assertEqual(status, 403)
+        self.user = {'id': 'admin', 'is_admin': True}
+        status, content = await call(self.app, 'DELETE', url)
         self.assertEqual(status, 200)
         status, _ = await call(self.app, 'GET', url)
         self.assertEqual(status, 404)
@@ -173,7 +176,7 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         with self.app.state.store.connect() as db:
             db.execute("INSERT INTO jobs (id, language, audio_name, status) VALUES (?, 'eng', 'old.wav', 'failed')", (legacy_id,))
         self.user = {'id': 'another-user', 'is_admin': False}
-        for suffix in ('', '/input/audio', '/input/text', '/artifacts/csv', '/sentences'):
+        for suffix in ('', '/input/audio', '/input/text', '/artifacts/csv', '/sentences', '/waveform'):
             self.assertEqual((await call(self.app, 'GET', '/v1/jobs/' + job_id + suffix))[0], 404)
         self.assertEqual((await call(self.app, 'GET', '/v1/jobs/bulk-artifacts.zip?job_ids=' + job_id))[0], 404)
         for method, suffix in (('POST', '/retry'), ('DELETE', '')):
@@ -182,7 +185,10 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(listed)['total'], 0)
         self.user = {'id': 'admin', 'is_admin': True}
         _, listed = await call(self.app, 'GET', '/v1/jobs')
-        self.assertEqual({job['id'] for job in json.loads(listed)['jobs']}, {job_id, legacy_id})
+        jobs = {job['id']: job for job in json.loads(listed)['jobs']}
+        self.assertEqual(set(jobs), {job_id, legacy_id})
+        self.assertEqual(jobs[legacy_id]['owner_username'], '历史任务')
+        self.assertEqual(jobs[job_id]['owner_username'], '未知用户')
 
     async def test_authentication_required(self):
         self.app.dependency_overrides.clear()
