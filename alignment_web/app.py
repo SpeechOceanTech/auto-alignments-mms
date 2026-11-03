@@ -205,8 +205,11 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
     def list_jobs(limit: int = 50, offset: int = 0, status: Optional[str] = None,
                   language: Optional[str] = None, q: Optional[str] = None,
                   created_from: Optional[date] = None, created_to: Optional[date] = None,
+                  owner_id: Optional[str] = None,
                   user: dict = Depends(require_account)):
         limit, offset = max(1, min(limit, 200)), max(0, offset)
+        if owner_id and not user['is_admin']:
+            raise HTTPException(403, '需要管理员权限')
         if status and status not in {'queued', 'running', 'completed', 'failed'}:
             raise HTTPException(400, '无效的任务状态')
         if created_from and created_to and created_from > created_to:
@@ -221,8 +224,9 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         jobs, total = store.list(limit, offset, status, language, q,
                                  str(created_from) if created_from else None,
                                  str(created_to) if created_to else None,
-                                 owner_id=None if user['is_admin'] else user['id'],
-                                 legacy_language=legacy_language)
+                                 owner_id=(None if owner_id == '__legacy__' else owner_id) if user['is_admin'] else user['id'],
+                                 legacy_language=legacy_language,
+                                 legacy_owner=owner_id == '__legacy__')
         jobs = [get_job(job['id'], user) for job in jobs]
         if user['is_admin']:
             owners = {job['owner_id'] for job in jobs if job['owner_id']}

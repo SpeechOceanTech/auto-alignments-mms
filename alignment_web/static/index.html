@@ -40,6 +40,7 @@
         <div class="toolbar"><h2>任务 / Jobs</h2><div class="toolbar-actions"><span id="selection-count" class="selection-count"></span><button id="delete-selected" class="outline danger" type="button" disabled>删除所选</button><button id="download-selected" class="outline" type="button" disabled>下载所选</button><button id="refresh" class="outline" type="button">刷新</button></div></div>
         <div class="job-filters">
           <div class="field"><label for="filter-language">语种</label><div class="language-picker"><input id="filter-language" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="filter-language-options" placeholder="全部语种"><div id="filter-language-options" class="language-options" role="listbox" hidden></div></div></div>
+          <div class="field" id="filter-owner-field" hidden><label for="filter-owner">用户</label><select id="filter-owner"><option value="">全部用户</option><option value="__legacy__">历史任务（无用户）</option></select></div>
           <div class="field"><label for="filter-status">状态</label><select id="filter-status"><option value="">全部状态</option><option value="queued">排队中</option><option value="running">对齐中</option><option value="completed">已完成</option><option value="failed">失败</option></select></div>
           <div class="field"><label for="filter-q">文件名 / 任务 ID</label><input id="filter-q" type="search" placeholder="搜索"></div>
           <div class="field"><label for="filter-from">开始日期</label><input id="filter-from" type="date"></div><div class="field"><label for="filter-to">结束日期</label><input id="filter-to" type="date"></div>
@@ -53,8 +54,7 @@
         <div class="toolbar"><h2 id="review-title">任务详情</h2><button id="close-review" class="outline" type="button">关闭</button></div>
         <div class="review-content">
           <audio id="review-audio" controls preload="metadata"></audio>
-          <div class="wave-tools"><label for="wave-zoom">波形缩放 <output id="wave-zoom-value">1×</output></label><input id="wave-zoom" type="range" min="1" max="48" value="1" aria-label="波形缩放"><span>可视范围 <span id="wave-visible">--:-- – --:--</span></span><span>滚轮缩放，拖动平移，点击跳转</span></div>
-          <canvas id="waveform" class="waveform" height="220" role="img" aria-label="音频波形和分句时间区间"></canvas>
+          <canvas id="waveform" class="waveform" height="120" role="img" aria-label="音频波形和分句时间区间；滚轮缩放，拖动平移，点击跳转" title="滚轮缩放，拖动平移，点击跳转"></canvas>
           <p id="wave-message" class="message" role="status">正在加载波形…</p>
           <h3>对齐结果 <small>点击句子播放该句</small></h3>
           <div class="segment-list"><table class="segment-table"><thead><tr><th>ID</th><th>开始时间</th><th>结束时间</th><th>文本</th></tr></thead><tbody id="segment-list"></tbody></table></div>

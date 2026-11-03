@@ -153,6 +153,7 @@ for iso, name, english, locales, extra in _LANGUAGES:
         duplicate_region = sum(option_region == region for _, option_region in options) > 1
         label = f'{name}（{region}，{locale}）' if duplicate_region else f'{name}（{region}）'
         COMMON_LANGUAGES.append({'code': locale, 'name': label, 'iso': iso,
+                                 'language_name': name, 'region': region,
                                  'english': english, 'aliases': aliases})
         _LOCALE_ISOS[locale] = iso
         _ALIAS_LOCALES[_key(locale)] = locale

@@ -2,6 +2,7 @@ const $ = (selector) => document.querySelector(selector);
 const statusNames = {queued: '排队中', running: '对齐中', completed: '已完成', failed: '失败'};
 let languageChoices = [];
 const state = {csrf: '', user: null, offset: 0, limit: 20, total: 0, jobs: [], selected: new Map()};
+let userFilterLoadVersion = 0;
 function node(tag, text, cls) { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (cls) el.className = cls; return el; }
 function action(text, callback, cls = '') { const el = node('button', text, `text-button ${cls}`); el.type = 'button'; el.onclick = callback; return el; }
 function formatTime(seconds) { if (!Number.isFinite(Number(seconds))) return '--:--'; const ms = Math.round(Math.max(0, Number(seconds)) * 1000); const hours = Math.floor(ms / 3600000); const minutes = Math.floor(ms % 3600000 / 60000); const remainder = (ms % 60000 / 1000).toFixed(3).padStart(6, '0'); return `${hours ? `${hours}:` : ''}${String(minutes).padStart(2, '0')}:${remainder}`; }
@@ -19,8 +20,11 @@ function showAccount(user, csrf = '') {
   $('#account-panel').hidden = !!user; $('#workspace').hidden = !user; $('#logout').hidden = !user;
   $('#account-label').textContent = user ? (user.username || user.email) : '';
   $('#admin-navigation').hidden = !user; $('#tab-accounts').hidden = !user?.is_admin; $('#delete-selected').hidden = !user?.is_admin; $('#job-user-header').hidden = !user?.is_admin;
+  $('#filter-owner-field').hidden = !user?.is_admin; $('.job-filters').classList.toggle('admin-filters', !!user?.is_admin);
+  userFilterLoadVersion++; $('#filter-owner').replaceChildren(new Option('全部用户', ''), new Option('历史任务（无用户）', '__legacy__')); if (user?.is_admin) loadFilterUsers(user.id);
   if (!user) { state.selected.clear(); closeReview(); $('#account-code').value = ''; hideNewKey(); switchTab('details'); }
 }
+async function loadFilterUsers(userId) { const version = ++userFilterLoadVersion; try { const data = await request('/api/admin/users'); if (version !== userFilterLoadVersion || !state.user?.is_admin || state.user.id !== userId) return; const select = $('#filter-owner'), previous = select.value, previousLabel = select.selectedOptions[0]?.textContent; const options = [new Option('全部用户', ''), new Option('历史任务（无用户）', '__legacy__')]; for (const user of data.users) options.push(new Option(user.username, user.id)); if (previous && !options.some(option => option.value === previous)) options.push(new Option(previousLabel || '未知用户', previous)); select.replaceChildren(...options); select.value = previous; } catch (error) { if (version === userFilterLoadVersion && state.user?.is_admin && state.user.id === userId) $('#jobs-message').textContent = `加载用户筛选失败：${error.message}`; } }
 async function checkSession() {
   try { const data = await request('/api/auth/me'); showAccount(data.user, data.csrf_token); if (data.user) { loadLanguages(); refresh(); } }
   catch (error) { showAccount(null); $('#account-message').textContent = error.message; }
@@ -48,13 +52,45 @@ function setupLanguagePicker(inputId, optionsId) {
   function close() { options.hidden = true; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); active = -1; }
   function choose(index) { const item = matches[index]; if (!item) return; input.value = item.code; close(); input.dispatchEvent(new Event('input', {bubbles:true})); close(); }
   function highlight() { [...options.querySelectorAll('[role=option]')].forEach((item, index) => { item.setAttribute('aria-selected', String(index === active)); if (index === active) { input.setAttribute('aria-activedescendant', item.id); item.scrollIntoView({block:'nearest'}); } }); }
-  function draw(showAll = false) { const query = showAll ? '' : input.value.trim().toLowerCase().replaceAll('-', '_'); matches = languageChoices.filter(item => [item.code, item.name, item.iso, item.english, ...(item.aliases || [])].some(value => String(value || '').toLowerCase().replaceAll('-', '_').includes(query)));
-    matches.sort((a, b) => { const aCode = a.code.toLowerCase(), bCode = b.code.toLowerCase(); return Number(bCode === query) - Number(aCode === query); }); options.replaceChildren(); active = -1; if (!matches.length) { close(); return; } matches.forEach((item, index) => { const el = node('div', undefined, 'language-option'); el.id = `${options.id}-${index}`; el.setAttribute('role', 'option'); el.setAttribute('aria-selected', 'false'); el.append(node('span', item.name), node('span', item.code, 'language-code')); el.onmousedown = event => event.preventDefault(); el.onclick = () => choose(index); options.append(el); }); options.hidden = false; input.setAttribute('aria-expanded', 'true'); }
+  function draw(showAll = false) {
+    const query = showAll ? '' : input.value.trim().toLowerCase().replaceAll('-', '_');
+    matches = languageChoices.filter(item => [item.code, item.name, item.iso, item.english, ...(item.aliases || [])].some(value => String(value || '').toLowerCase().replaceAll('-', '_').includes(query)));
+    matches.sort((a, b) => Number(b.code.toLowerCase() === query) - Number(a.code.toLowerCase() === query));
+    // Keep each language together while retaining the original order within it.
+    const groups = new Map();
+    for (const item of matches) {
+      const key = item.iso || item.english || item.name;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
+    }
+    matches = [...groups.values()].flat();
+    options.replaceChildren(); active = -1;
+    if (!matches.length) { close(); return; }
+    let index = 0;
+    for (const items of groups.values()) {
+      const first = items[0];
+      const languageName = first.language_name || first.aliases?.[1] || first.name.replace(/（[^（）]*）$/, '');
+      const heading = node('div', undefined, 'language-group-heading');
+      heading.setAttribute('role', 'presentation');
+      heading.append(node('span', languageName, 'language-group-name'), node('span', first.english, 'language-group-english'));
+      options.append(heading);
+      for (const item of items) {
+        const optionIndex = index++;
+        const region = item.region || item.name.slice(languageName.length).replace(/^（|）$/g, '').replace(/，[^，]+$/, '');
+        const el = node('div', undefined, 'language-option');
+        el.id = `${options.id}-${optionIndex}`; el.setAttribute('role', 'option'); el.setAttribute('aria-selected', 'false');
+        el.setAttribute('aria-label', `${item.name} ${item.code}`);
+        el.append(node('span', region || item.name, 'language-region'), node('span', item.code, 'language-code'));
+        el.onmousedown = event => event.preventDefault(); el.onclick = () => choose(optionIndex); options.append(el);
+      }
+    }
+    options.hidden = false; input.setAttribute('aria-expanded', 'true');
+  }
   input.addEventListener('focus', () => { draw(true); input.select(); }); input.addEventListener('input', () => draw()); input.addEventListener('blur', close);
   input.addEventListener('keydown', event => { if (event.key === 'Escape') { close(); return; } if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { if (options.hidden) draw(true); if (!matches.length) return; event.preventDefault(); active = (active + (event.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length; highlight(); } else if (event.key === 'Enter' && !options.hidden && active >= 0) { event.preventDefault(); choose(active); } });
 }
 setupLanguagePicker('#language', '#language-options'); setupLanguagePicker('#filter-language', '#filter-language-options');
-function filters() { const query = new URLSearchParams({limit: state.limit, offset: state.offset}); for (const [id, name] of [['filter-language','language'], ['filter-status','status'], ['filter-q','q'], ['filter-from','created_from'], ['filter-to','created_to']]) { const value = $(`#${id}`).value.trim(); if (value) query.set(name, value); } return query; }
+function filters() { const query = new URLSearchParams({limit: state.limit, offset: state.offset}); for (const [id, name] of [['filter-language','language'], ['filter-status','status'], ['filter-q','q'], ['filter-from','created_from'], ['filter-to','created_to']]) { const value = $(`#${id}`).value.trim(); if (value) query.set(name, value); } if (state.user?.is_admin && $('#filter-owner').value) query.set('owner_id', $('#filter-owner').value); return query; }
 function updateSelection() { const selectable = state.jobs.filter(j => j.status === 'completed' || j.status === 'failed'); const checked = selectable.filter(j => state.selected.has(j.id)); $('#select-all').checked = !!selectable.length && checked.length === selectable.length; $('#select-all').indeterminate = !!checked.length && checked.length < selectable.length; $('#delete-selected').disabled = !state.selected.size; $('#download-selected').disabled = !state.selected.size; $('#selection-count').textContent = state.selected.size ? `已选 ${state.selected.size} 项` : '';  }
 let copyMessageUntil = 0;
 async function copyText(value) {
@@ -84,11 +120,11 @@ async function removeJobs(ids) { if (!state.user?.is_admin) return; if (!confirm
 async function retry(id) { try { await request(`/v1/jobs/${id}/retry`, {method:'POST'}); state.selected.delete(id); refresh(); } catch (e) { $('#jobs-message').textContent = e.message; } }
 $('#delete-selected').onclick = () => removeJobs([...state.selected.keys()]);
 $('#download-selected').onclick = () => { const ids = [...state.selected].filter(([, status]) => status === 'completed').map(([id]) => id); if (!ids.length) { $('#jobs-message').textContent = '请选择已完成的任务下载。'; return; } if (ids.length > 200) { $('#jobs-message').textContent = '每次最多下载 200 个任务。'; return; } const query = new URLSearchParams({job_ids:ids.join(','), formats:'csv,txt,textgrid'}); fetch(`/v1/jobs/bulk-artifacts.zip?${query}`).then(async response => { if (!response.ok) { let data = {}; try { data = await response.json(); } catch (_) {} throw new Error(data.detail || `下载失败 (${response.status})`); } return response.blob(); }).then(blob => { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'alignment-results.zip'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }).catch(error => { $('#jobs-message').textContent = error.message; }); };
-$('#refresh').onclick = refresh; $('#prev-page').onclick = () => { state.offset = Math.max(0, state.offset - state.limit); refresh(); }; $('#next-page').onclick = () => { state.offset += state.limit; refresh(); };
-let filterTimer; for (const id of ['filter-language','filter-status','filter-q','filter-from','filter-to']) $(`#${id}`).addEventListener('input', () => { clearTimeout(filterTimer); filterTimer = setTimeout(() => { state.offset = 0; state.selected.clear(); refresh(); }, 300); });
-$('#clear-filters').onclick = () => { for (const id of ['filter-language','filter-status','filter-q','filter-from','filter-to']) $(`#${id}`).value = ''; state.offset = 0; state.selected.clear(); refresh(); };
+$('#refresh').onclick = async () => { await refresh(); if (state.user?.is_admin) await loadFilterUsers(state.user.id); }; $('#prev-page').onclick = () => { state.offset = Math.max(0, state.offset - state.limit); refresh(); }; $('#next-page').onclick = () => { state.offset += state.limit; refresh(); };
+let filterTimer; for (const id of ['filter-language','filter-status','filter-q','filter-from','filter-to','filter-owner']) $(`#${id}`).addEventListener('input', () => { clearTimeout(filterTimer); filterTimer = setTimeout(() => { state.offset = 0; state.selected.clear(); refresh(); }, 300); });
+$('#clear-filters').onclick = () => { for (const id of ['filter-language','filter-status','filter-q','filter-from','filter-to','filter-owner']) $(`#${id}`).value = ''; state.offset = 0; state.selected.clear(); refresh(); };
 const reviewAudio = $('#review-audio');
-const waveform = new WaveformReview($('#waveform'), reviewAudio, $('#wave-zoom'), $('#wave-zoom-value'), $('#wave-visible'), formatTime);
+const waveform = new WaveformReview($('#waveform'), reviewAudio);
 let reviewEpoch = 0, reviewSegments = [], reviewRows = [], activeRow = -1, playUntil = null, playTimer = null;
 function clearPlayUntil() { playUntil = null; clearTimeout(playTimer); playTimer = null; }
 function stopAtSegmentEnd() {

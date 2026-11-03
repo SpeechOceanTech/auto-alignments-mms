@@ -193,3 +193,28 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
     async def test_authentication_required(self):
         self.app.dependency_overrides.clear()
         self.assertEqual((await call(self.app, 'GET', '/v1/jobs'))[0], 503)
+
+    async def test_admin_owner_filter_paginates_and_protects_private_jobs(self):
+        store = self.app.state.store
+        for job_id, owner, language in [('a' * 32, 'alice', 'en_us'),
+                                         ('b' * 32, 'alice', 'en_us'),
+                                         ('c' * 32, 'bob', 'en_us'),
+                                         ('d' * 32, None, 'en_us'),
+                                         ('e' * 32, 'alice', 'fr_fr')]:
+            store.create(job_id, language, 'recording.wav', owner)
+        self.user = {'id': 'bob', 'is_admin': False}
+        for owner in ('alice', '__legacy__'):
+            status, _ = await call(self.app, 'GET', '/v1/jobs?owner_id=' + owner)
+            self.assertEqual(status, 403)
+        _, content = await call(self.app, 'GET', '/v1/jobs')
+        self.assertEqual([job['id'] for job in json.loads(content)['jobs']], ['c' * 32])
+
+        self.user = {'id': 'admin', 'is_admin': True}
+        _, content = await call(self.app, 'GET', '/v1/jobs?owner_id=alice&language=en_us&limit=1&offset=1')
+        result = json.loads(content)
+        self.assertEqual(result['total'], 2)
+        self.assertEqual([job['id'] for job in result['jobs']], ['a' * 32])
+        _, content = await call(self.app, 'GET', '/v1/jobs?owner_id=__legacy__')
+        self.assertEqual([job['id'] for job in json.loads(content)['jobs']], ['d' * 32])
+        _, content = await call(self.app, 'GET', '/v1/jobs?owner_id=missing')
+        self.assertEqual(json.loads(content)['total'], 0)

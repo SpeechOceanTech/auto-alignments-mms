@@ -11,17 +11,17 @@ assert.equal(WaveformMath.activeSegment(segments, 10), -1);
 class Element {
   constructor() { this.events = {}; this.clientWidth = 500; this.value = 1; this.textContent = ''; }
   addEventListener(name, cb) { this.events[name] = cb; }
-  getBoundingClientRect() { return {left:100,width:500}; }
+  getBoundingClientRect() { return {left:100,width:500,height:120}; }
   getContext() { return {clearRect(){},fillRect(){},beginPath(){},moveTo(){},lineTo(){},stroke(){}}; }
   setPointerCapture() {}
 }
 global.window = {devicePixelRatio:1,addEventListener(){}};
-const canvas = new Element(), audio = {currentTime:0,paused:true}, slider = new Element(), value = new Element(), visible = new Element();
-const wave = new WaveformReview(canvas, audio, slider, value, visible, n => n.toFixed(1));
+const canvas = new Element(), audio = {currentTime:0,paused:true};
+const wave = new WaveformReview(canvas, audio);
 wave.setData({duration:100, peaks:Array.from({length:100}, () => [-.5,.5])});
 wave.setSegments(segments);
 canvas.events.wheel({preventDefault(){}, clientX:225, deltaY:-1});
-assert.equal(wave.zoom, 2); assert.equal(wave.position, 12.5); assert.equal(value.textContent, '2×');
+assert.equal(wave.zoom, 2); assert.equal(wave.position, 12.5); assert.equal(canvas.height, 120);
 let seek = null; wave.onSeek = time => { seek = time; };
 canvas.events.pointerdown({button:0,clientX:350,pointerId:1});
 canvas.events.pointerup({clientX:350});
@@ -31,5 +31,5 @@ canvas.events.pointermove({clientX:200}); canvas.events.pointerup({clientX:200})
 assert.equal(wave.position, 22.5, 'drag pans without seeking'); assert.equal(seek, 37.5);
 audio.currentTime = 90; audio.paused = false; wave.showTime(90);
 assert.equal(wave.position, 50, 'playing cursor scrolls into view without passing the end');
-wave.reset(); assert.equal(wave.duration, 0); assert.equal(value.textContent, '1×');
+wave.reset(); assert.equal(wave.duration, 0); assert.equal(wave.zoom, 1);
 console.log('waveform tests passed');

@@ -36,9 +36,11 @@ class JobStore:
             row = db.execute('SELECT * FROM jobs WHERE id=?', (job_id,)).fetchone()
             return dict(row) if row else None
 
-    def list(self, limit, offset, status=None, language=None, q=None, created_from=None, created_to=None, owner_id=None, legacy_language=None):
+    def list(self, limit, offset, status=None, language=None, q=None, created_from=None, created_to=None, owner_id=None, legacy_language=None, legacy_owner=False):
         conditions, values = [], []
-        if owner_id is not None:
+        if legacy_owner:
+            conditions.append('owner_id IS NULL')
+        elif owner_id is not None:
             conditions.append('owner_id=?')
             values.append(owner_id)
         if status:

@@ -42,6 +42,10 @@ class LanguageTests(unittest.TestCase):
             self.assertEqual(canonical_locale(item['code']), item['code'])
             self.assertEqual(normalize_language(item['code']), item['iso'])
             self.assertEqual(canonical_locale(item['name']), item['code'])
+            self.assertTrue(item['name'].startswith(item['language_name'] + '（'))
+            self.assertIn(item['region'], item['name'])
+        nested = next(item for item in COMMON_LANGUAGES if item['code'] == 'ln_cd')
+        self.assertEqual((nested['language_name'], nested['region']), ('林加拉语', '刚果（金）'))
 
 
 if __name__ == "__main__":
