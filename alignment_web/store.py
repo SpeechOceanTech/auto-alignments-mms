@@ -14,6 +14,10 @@ class JobStore:
             )""")
             if 'owner_id' not in {row['name'] for row in db.execute('PRAGMA table_info(jobs)')}:
                 db.execute('ALTER TABLE jobs ADD COLUMN owner_id TEXT')
+            db.execute("""CREATE TABLE IF NOT EXISTS completion_facts (
+                job_id TEXT PRIMARY KEY, language TEXT NOT NULL, owner_id TEXT,
+                completed_at TEXT NOT NULL, audio_seconds REAL, sentence_count INTEGER
+            )""")
             db.execute('CREATE INDEX IF NOT EXISTS jobs_owner_id ON jobs(owner_id)')
 
     def connect(self):
@@ -80,10 +84,56 @@ class JobStore:
             db.execute("UPDATE jobs SET status='running', updated_at=CURRENT_TIMESTAMP WHERE id=?", (row['id'],))
             return row['id']
 
-    def finish(self, job_id, error=None):
+    def finish(self, job_id, error=None, audio_seconds=None, sentence_count=None):
         with self.connect() as db:
-            db.execute("UPDATE jobs SET status=?, error=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'",
-                       ('failed' if error else 'completed', error, job_id))
+            db.execute('BEGIN IMMEDIATE')
+            cur = db.execute("UPDATE jobs SET status=?, error=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'",
+                             ('failed' if error else 'completed', error, job_id))
+            if cur.rowcount and not error:
+                db.execute("""INSERT OR IGNORE INTO completion_facts
+                    (job_id, language, owner_id, completed_at, audio_seconds, sentence_count)
+                    SELECT id, language, owner_id, updated_at, ?, ? FROM jobs WHERE id=?""",
+                    (audio_seconds, sentence_count, job_id))
+
+    def seed_completed_statistics(self):
+        # Preserve the historical count immediately; metadata is filled asynchronously.
+        with self.connect() as db:
+            db.execute("""INSERT OR IGNORE INTO completion_facts
+                (job_id, language, owner_id, completed_at)
+                SELECT id, language, owner_id, updated_at FROM jobs WHERE status='completed'""")
+
+    def incomplete_statistics(self):
+        with self.connect() as db:
+            rows = db.execute("""SELECT j.id, j.audio_name FROM jobs j LEFT JOIN completion_facts f ON f.job_id=j.id
+                WHERE j.status='completed' AND (f.job_id IS NULL OR f.audio_seconds IS NULL OR f.sentence_count IS NULL)""").fetchall()
+            return [dict(row) for row in rows]
+
+    def fill_statistics(self, job_id, audio_seconds, sentence_count):
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("""INSERT OR IGNORE INTO completion_facts
+                (job_id, language, owner_id, completed_at, audio_seconds, sentence_count)
+                SELECT id, language, owner_id, updated_at, ?, ? FROM jobs WHERE id=? AND status='completed'""",
+                (audio_seconds, sentence_count, job_id))
+            db.execute("""UPDATE completion_facts SET audio_seconds=COALESCE(audio_seconds, ?),
+                sentence_count=COALESCE(sentence_count, ?) WHERE job_id=?""",
+                (audio_seconds, sentence_count, job_id))
+
+    def usage(self):
+        metrics = """count(*) AS jobs,
+            coalesce(sum(audio_seconds), 0) AS audio_seconds,
+            count(audio_seconds) AS audio_duration_sample_count,
+            coalesce(sum(sentence_count), 0) AS sentence_count,
+            count(sentence_count) AS sentence_sample_count"""
+        with self.connect() as db:
+            db.execute('BEGIN')
+            totals = dict(db.execute('SELECT ' + metrics + ' FROM completion_facts').fetchone())
+            languages = [dict(row) for row in db.execute('SELECT language, ' + metrics + ' FROM completion_facts GROUP BY language ORDER BY jobs DESC, language')]
+            users = [dict(row) for row in db.execute('SELECT owner_id, ' + metrics + ' FROM completion_facts GROUP BY owner_id ORDER BY jobs DESC, owner_id')]
+            statuses = dict(db.execute('SELECT status, count(*) FROM jobs GROUP BY status').fetchall())
+        totals['completed'] = totals['jobs']
+        return {'totals': totals, 'languages': languages, 'users': users,
+                'current': {status: statuses.get(status, 0) for status in ('queued', 'running', 'completed', 'failed')}}
 
     def delete(self, job_id):
         with self.connect() as db:

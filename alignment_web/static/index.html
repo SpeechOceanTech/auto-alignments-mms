@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>长音频文本对齐服务</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=20261103-stats">
 </head>
 <body>
   <header>
@@ -22,7 +22,7 @@
   </section>
   <main id="workspace" hidden>
     <nav id="admin-navigation" class="admin-navigation" aria-label="管理页面" hidden>
-      <button id="tab-details" class="active" type="button">任务详情</button><button id="tab-api-keys" type="button">API 密钥</button><button id="tab-accounts" type="button" hidden>账号管理</button>
+      <button id="tab-details" class="active" type="button">任务详情</button><button id="tab-statistics" type="button" hidden>统计总览</button><button id="tab-api-keys" type="button">API 密钥</button><button id="tab-accounts" type="button" hidden>账号管理</button>
     </nav>
     <div id="task-detail-panel" class="task-detail-panel">
       <section class="controls">
@@ -89,11 +89,25 @@
         </div>
       </section>
     </div>
+    <section id="statistics-panel" class="admin-panel stats-panel" hidden>
+      <div class="toolbar"><div><h2>统计总览</h2><small>查看累计对齐成果和当前任务状态</small></div><button id="refresh-statistics" class="outline" type="button">刷新</button></div>
+      <div class="stats-content">
+        <h3 class="stats-section-title">系统对齐任务</h3><p class="stats-note">累计统计按成功完成的任务计数；重试成功计为一次，重新提交计为新任务。删除任务不影响累计统计。</p>
+        <div id="stats-summary" class="stats-summary" aria-label="累计对齐成果"></div>
+        <p id="stats-coverage" class="stats-coverage"></p>
+        <div class="stats-grid">
+          <section class="stats-card stats-status"><div class="stats-card-heading"><h3>当前任务状态</h3><span>现存任务</span></div><div id="stats-status" class="stats-status-list"></div></section>
+          <section class="stats-card"><div class="stats-card-heading"><h3>语种分布</h3><span>按累计完成任务数排序</span></div><div id="stats-languages" class="stats-table-wrap"></div></section>
+          <section class="stats-card"><div class="stats-card-heading"><h3>用户分布</h3><span>按累计完成任务数排序</span></div><div id="stats-users" class="stats-table-wrap"></div></section>
+        </div>
+        <p id="stats-message" class="message" role="status"></p>
+      </div>
+    </section>
     <section id="api-keys-panel" class="admin-panel" hidden><div class="toolbar"><h2>API 密钥</h2><button id="refresh-api-keys" class="outline" type="button">刷新</button></div><div class="api-key-content"><p>使用密钥在 API 请求中携带 <code>Authorization: Bearer &lt;密钥&gt;</code>。密钥只在创建时显示一次，请妥善保存。</p><form id="api-key-form" class="api-key-form"><div class="field"><label for="api-key-name">密钥名称</label><input id="api-key-name" maxlength="100" required placeholder="例如：我的脚本"></div><button id="api-key-create" type="submit">创建密钥</button></form><div id="new-api-key" class="new-api-key" hidden><strong>请立即复制密钥；关闭或离开此页面后将无法再次查看。</strong><div class="api-key-secret-row"><input id="api-key-secret" readonly aria-label="新创建的 API 密钥"><button id="copy-api-key" class="outline" type="button">复制</button><button id="close-api-key" class="outline" type="button">关闭</button></div></div><div id="api-key-list"></div><p id="api-key-message" class="message" role="status"></p></div></section>
     <section id="admin-accounts" class="admin-panel" hidden><div class="toolbar"><h2>账号管理</h2><button id="refresh-users" class="outline" type="button">刷新</button></div><p class="admin-description">管理已登录用户的状态和管理员权限。</p><div id="user-list"></div><p id="admin-message" class="message" role="status"></p></section>
   </main>
   <script src="/static/date-picker.js" defer></script>
   <script src="/static/waveform.js"></script>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20261103-stats"></script>
 </body>
 </html>

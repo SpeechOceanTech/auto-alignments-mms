@@ -23,7 +23,8 @@ from starlette.concurrency import run_in_threadpool
 from alignment_languages import COMMON_LANGUAGES, canonical_locale, normalize_language
 
 from .store import JobStore
-from .auth import AuthStore, SmtpCodeSender, require_account, router as auth_router
+from .statistics import audio_duration, output_sentences
+from .auth import AuthStore, SmtpCodeSender, require_account, require_admin, router as auth_router
 
 LOG = logging.getLogger(__name__)
 TEXT_LIMIT = 2 * 1024 * 1024
@@ -151,6 +152,14 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
             job['artifacts'] = []
         return job
 
+    def statistics_for(job):
+        try:
+            directory = job_dir(job['id'])
+            return audio_duration(job_audio(job)), output_sentences(directory / 'output' / FORMATS['csv'])
+        except Exception:
+            LOG.warning('Cannot collect statistics for job %s', job['id'], exc_info=True)
+            return None, None
+
     def work():
         while not stop.is_set():
             job_id = store.claim()
@@ -174,10 +183,20 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
                     destination = output / filename
                     if source.resolve() != destination.resolve():
                         shutil.copyfile(source, destination)
-                store.finish(job_id)
+                duration, sentence_count = statistics_for(job)
+                store.finish(job_id, audio_seconds=duration, sentence_count=sentence_count)
             except Exception as exc:
                 LOG.exception('Alignment job %s failed', job_id)
                 store.finish(job_id, (str(exc) or type(exc).__name__)[:2000])
+
+    def backfill_statistics():
+        for job in store.incomplete_statistics():
+            if stop.is_set():
+                break
+            try:
+                store.fill_statistics(job['id'], *statistics_for(job))
+            except (OSError, ValueError, HTTPException):
+                LOG.warning('Cannot collect statistics for job %s', job['id'], exc_info=True)
 
     @app.on_event('startup')
     def startup():
@@ -186,9 +205,12 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
             if JOB_PATTERN.fullmatch(path.parent.name) and path.is_file():
                 path.unlink(missing_ok=True)
         store.recover()
+        store.seed_completed_statistics()
         stop.clear()
         app.state.worker = threading.Thread(target=work, daemon=True, name='alignment-worker')
         app.state.worker.start()
+        app.state.stats_worker = threading.Thread(target=backfill_statistics, daemon=True, name='alignment-stats-backfill')
+        app.state.stats_worker.start()
 
     @app.on_event('shutdown')
     def shutdown():
@@ -196,6 +218,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         wake.set()
         # A running alignment may take hours; it will be marked interrupted on restart.
         app.state.worker.join(timeout=1)
+        app.state.stats_worker.join(timeout=1)
 
     @app.get('/', response_class=HTMLResponse, include_in_schema=False)
     def index():
@@ -208,6 +231,23 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
     @app.get('/v1/languages')
     def languages():
         return {'languages': COMMON_LANGUAGES}
+
+    @app.get('/api/admin/usage')
+    def usage(user: dict = Depends(require_admin)):
+        data = store.usage()
+        normalized = set()
+        for item in data['languages']:
+            try:
+                normalized.add(normalize_language(item['language']))
+            except ValueError:
+                normalized.add(item['language'])
+        data['totals']['language_count'] = len(normalized)
+        owners = {item['owner_id'] for item in data['users'] if item['owner_id']}
+        usernames = app.state.auth_store.usernames_for_ids(owners) if app.state.auth_store else {}
+        for item in data['users']:
+            owner = item['owner_id']
+            item['username'] = usernames.get(owner, '未知用户') if owner else '历史任务'
+        return data
 
     @app.get('/v1/jobs')
     def list_jobs(limit: int = 50, offset: int = 0, status: Optional[str] = None,
@@ -414,6 +454,8 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         job = get_job(job_id, user)
         if not user['is_admin']:
             raise HTTPException(403, '只有管理员可以删除任务')
+        if job['status'] == 'completed':
+            store.fill_statistics(job_id, *statistics_for(job))
         if not store.delete(job_id):
             raise HTTPException(409, '排队中或运行中的任务不能删除')
         shutil.rmtree(job_dir(job_id), ignore_errors=True)

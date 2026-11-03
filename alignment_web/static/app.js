@@ -19,7 +19,7 @@ function showAccount(user, csrf = '') {
   state.user = user; state.csrf = csrf;
   $('#account-panel').hidden = !!user; $('#workspace').hidden = !user; $('#logout').hidden = !user;
   $('#account-label').textContent = user ? (user.username || user.email) : '';
-  $('#admin-navigation').hidden = !user; $('#tab-accounts').hidden = !user?.is_admin; $('#delete-selected').hidden = !user?.is_admin; $('#job-user-header').hidden = !user?.is_admin;
+  $('#admin-navigation').hidden = !user; $('#tab-accounts').hidden = !user?.is_admin; $('#tab-statistics').hidden = !user?.is_admin; $('#delete-selected').hidden = !user?.is_admin; $('#job-user-header').hidden = !user?.is_admin;
   $('#filter-owner-field').hidden = !user?.is_admin; $('.job-filters').classList.toggle('admin-filters', !!user?.is_admin);
   userFilterLoadVersion++; $('#filter-owner').replaceChildren(new Option('全部用户', ''), new Option('历史任务（无用户）', '__legacy__')); if (user?.is_admin) loadFilterUsers(user.id);
   if (!user) { state.selected.clear(); closeReview(); $('#account-code').value = ''; hideNewKey(); switchTab('details'); }
@@ -35,8 +35,57 @@ $('#account-email').addEventListener('input', (event) => { event.target.value = 
 $('#verify-code').onclick = async () => { const email = $('#account-email').value.trim(), code = $('#account-code').value.trim(); if (!email || !code) { $('#account-message').textContent = '请输入邮箱和验证码'; return; } $('#verify-code').disabled = true; try { const data = await request('/api/auth/verify-code', json({email, code})); showAccount(data.user, data.csrf_token); $('#account-message').textContent = ''; loadLanguages(); refresh(); } catch (e) { $('#account-message').textContent = e.message; } finally { $('#verify-code').disabled = false; } };
 $('#account-code').addEventListener('keydown', (event) => { if (event.key === 'Enter') $('#verify-code').click(); });
 $('#logout').onclick = async () => { try { await request('/api/auth/logout', {method:'POST'}); showAccount(null); } catch (e) { alert(e.message); } };
-function switchTab(tab) { $('#task-detail-panel').hidden = tab !== 'details'; $('#admin-accounts').hidden = tab !== 'accounts'; $('#api-keys-panel').hidden = tab !== 'keys'; $('#tab-details').classList.toggle('active', tab === 'details'); $('#tab-api-keys').classList.toggle('active', tab === 'keys'); $('#tab-accounts').classList.toggle('active', tab === 'accounts'); if (tab !== 'keys') hideNewKey(); if (tab === 'accounts') loadUsers(); if (tab === 'keys') loadApiKeys(); }
-$('#tab-details').onclick = () => switchTab('details'); $('#tab-api-keys').onclick = () => switchTab('keys'); $('#tab-accounts').onclick = () => switchTab('accounts');
+function switchTab(tab) {
+  if (tab === 'statistics' && !state.user?.is_admin) tab = 'details';
+  $('#task-detail-panel').hidden = tab !== 'details'; $('#statistics-panel').hidden = tab !== 'statistics'; $('#admin-accounts').hidden = tab !== 'accounts'; $('#api-keys-panel').hidden = tab !== 'keys';
+  $('#tab-details').classList.toggle('active', tab === 'details'); $('#tab-statistics').classList.toggle('active', tab === 'statistics'); $('#tab-api-keys').classList.toggle('active', tab === 'keys'); $('#tab-accounts').classList.toggle('active', tab === 'accounts');
+  if (tab !== 'keys') hideNewKey(); if (tab === 'accounts') loadUsers(); if (tab === 'keys') loadApiKeys(); if (tab === 'statistics') loadStatistics();
+}
+$('#tab-details').onclick = () => switchTab('details'); $('#tab-statistics').onclick = () => switchTab('statistics'); $('#tab-api-keys').onclick = () => switchTab('keys'); $('#tab-accounts').onclick = () => switchTab('accounts');
+const statsNumber = number => Number(number || 0).toLocaleString('zh-CN');
+const statsHours = seconds => (Number(seconds || 0) / 3600).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+function renderStatsTable(target, rows, kind, completed) {
+  if (!rows.length) { target.replaceChildren(node('p', '暂无已完成任务', 'stats-empty')); return; }
+  const table = node('table'), thead = node('thead'), head = node('tr'), tbody = node('tbody');
+  for (const label of [kind === 'language' ? '语种' : '用户', '完成任务', '音频时长', '句数', '占比']) head.append(node('th', label));
+  thead.append(head);
+  const denominator = Math.max(Number(completed) || 0, 1);
+  for (const item of rows) {
+    const row = node('tr');
+    const code = kind === 'language' ? item.language : (item.username || '历史任务（无用户）');
+    const label = kind === 'language' ? (languageChoices.find(choice => choice.code === code)?.name || code) : code;
+    const name = node('td', label); if (kind === 'language' && label !== code) name.append(node('small', code, 'stats-code'));
+    const duration = Number(item.audio_duration_sample_count || 0) ? `${statsHours(item.audio_seconds)} 小时${Number(item.audio_duration_sample_count) < Number(item.jobs) ? ' *' : ''}` : '—';
+    const sentences = Number(item.sentence_sample_count || 0) ? `${statsNumber(item.sentence_count)}${Number(item.sentence_sample_count) < Number(item.jobs) ? ' *' : ''}` : '—';
+    const metric = node('td'), bar = node('div', undefined, 'stats-bar'), fill = node('div', undefined, 'stats-bar-fill');
+    const percent = Math.max(0, Math.min(100, Number(item.jobs || 0) / denominator * 100)); fill.style.width = `${percent}%`; bar.append(fill); metric.append(bar, node('span', `${percent.toFixed(1)}%`, 'stats-percent'));
+    row.append(name, node('td', statsNumber(item.jobs)), node('td', duration), node('td', sentences), metric); tbody.append(row);
+  }
+  table.append(thead, tbody); target.replaceChildren(table);
+}
+async function loadStatistics() {
+  if (!state.user?.is_admin) return;
+  const userId = state.user.id;
+  $('#stats-message').textContent = '正在加载统计…';
+  try {
+    const data = await request('/api/admin/usage'); if (!state.user?.is_admin || state.user.id !== userId) return;
+    const total = data.totals, completed = Number(total.completed || 0);
+    const metrics = [
+      ['累计完成任务', statsNumber(completed), '个'],
+      ['累计音频时长', Number(total.audio_duration_sample_count || 0) ? statsHours(total.audio_seconds) : '—', '小时'],
+      ['覆盖语种', statsNumber(total.language_count), '种'],
+      ['累计对齐句数', Number(total.sentence_sample_count || 0) ? statsNumber(total.sentence_count) : '—', '句'],
+    ];
+    $('#stats-summary').replaceChildren(...metrics.map(([label, value, unit]) => { const card = node('div', undefined, 'stats-metric'); const number = node('div', undefined, 'stats-metric-value'); number.append(document.createTextNode(value), node('span', unit)); card.append(node('div', label, 'stats-metric-label'), number); return card; }));
+    const missingDuration = Math.max(0, completed - Number(total.audio_duration_sample_count || 0));
+    const missingSentences = Math.max(0, completed - Number(total.sentence_sample_count || 0));
+    $('#stats-coverage').textContent = missingDuration || missingSentences ? `部分任务数据尚未取得：${statsNumber(missingDuration)} 个任务缺少音频时长，${statsNumber(missingSentences)} 个任务缺少句数；相应合计仅包含已有数据；分布中 * 表示该项数据不完整。` : '音频时长和句数已覆盖所有已完成任务。';
+    const statuses = [['queued', '排队中'], ['running', '对齐中'], ['completed', '已完成'], ['failed', '失败']];
+    $('#stats-status').replaceChildren(...statuses.map(([key, label]) => { const item = node('div', undefined, 'stats-status-item'); item.append(node('span', label, `stats-status-label ${key}`), node('strong', statsNumber(data.current[key]))); return item; }));
+    renderStatsTable($('#stats-languages'), data.languages || [], 'language', completed); renderStatsTable($('#stats-users'), data.users || [], 'user', completed); $('#stats-message').textContent = '';
+  } catch (error) { if (state.user?.is_admin && state.user.id === userId) $('#stats-message').textContent = `加载统计失败：${error.message}`; }
+}
+$('#refresh-statistics').onclick = loadStatistics;
 async function loadUsers() { const list = $('#user-list'); try { const data = await request('/api/admin/users'); const table = node('table'); const head = node('tr'); for (const label of ['用户名', '邮箱', '状态', '角色', '创建时间', '操作']) head.append(node('th', label)); const thead = node('thead'); thead.append(head); const tbody = node('tbody'); for (const user of data.users) { const tr = node('tr'); for (const text of [user.username, user.email, user.is_active ? '正常' : '已停用', user.is_admin ? '管理员' : '普通用户', formatDate(user.created_at)]) tr.append(node('td', text)); const cell = node('td'); const actions = node('div', undefined, 'row-actions'); if (user.id !== state.user.id) { actions.append(action(user.is_active ? '停用' : '启用', () => updateUser(user, {is_active: !user.is_active})), action(user.is_admin ? '取消管理员' : '设为管理员', () => updateUser(user, {is_admin: !user.is_admin}))); } else actions.append(node('span', '当前账号')); cell.append(actions); tr.append(cell); tbody.append(tr); } table.append(thead, tbody); list.replaceChildren(table); } catch (e) { list.replaceChildren(node('p', e.message, 'error')); } }
 async function updateUser(user, patch) { if (!confirm(`确认修改 ${user.email} 的账号设置？`)) return; try { await request(`/api/admin/users/${user.id}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)}); $('#admin-message').textContent = '账号已更新'; loadUsers(); } catch (e) { $('#admin-message').textContent = e.message; } }
 $('#refresh-users').onclick = loadUsers;
