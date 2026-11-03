@@ -17,6 +17,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from alignment_languages import COMMON_LANGUAGES, canonical_locale, normalize_language
 
@@ -61,7 +62,13 @@ class LimitBody:
 
 def _default_runner(audio_path, text_path, language, output_dir):
     from alignment_core import align
-    return align(audio_path, text_path, language, output_dir)
+    return align(audio_path, text_path, language, output_dir,
+                 already_converted=audio_path.name == 'normalized.wav')
+
+
+def _default_converter(audio_path, destination):
+    from alignment_core import convert_audio
+    convert_audio(audio_path, destination)
 
 
 def _private_file(path):
@@ -76,7 +83,7 @@ def _private_file(path):
     return value.strip()
 
 
-def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None):
+def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None, converter=None):
     data_dir = Path(data_dir or os.environ.get('ALIGN_WEB_DATA_DIR', 'service_data')).resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
     jobs_dir = data_dir / 'jobs'
@@ -86,6 +93,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         raise ValueError('ALIGN_WEB_MAX_AUDIO_MB must be positive')
     store = JobStore(data_dir / 'jobs.sqlite3')
     execute = runner or _default_runner
+    convert = converter or _default_converter
     stop = threading.Event()
     wake = threading.Event()
     app = FastAPI(title='MMS Audio Alignment API', description='长音频与文本自动对齐服务。')
@@ -117,6 +125,12 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
             raise HTTPException(404, '任务不存在')
         return jobs_dir / job_id
 
+    def job_audio(job):
+        directory = job_dir(job['id'])
+        normalized = directory / 'normalized.wav'
+        # Existing jobs retain their original paths; new jobs use normalized WAV.
+        return normalized if normalized.is_file() else directory / ('audio' + Path(job['audio_name']).suffix.lower())
+
     def get_job(job_id, user):
         job_dir(job_id)
         job = store.get(job_id)
@@ -140,7 +154,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
             try:
                 output = directory / 'output'
                 output.mkdir(exist_ok=True)
-                result = execute(directory / ('audio' + Path(job['audio_name']).suffix.lower()),
+                result = execute(job_audio(job),
                                  directory / 'input.txt', job['language'], output)
                 if not isinstance(result, dict):
                     raise RuntimeError('对齐后端未返回结果文件')
@@ -158,6 +172,10 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
 
     @app.on_event('startup')
     def startup():
+        # Staging files can only be left behind by an interrupted upload/conversion.
+        for path in jobs_dir.glob('*/.upload-*'):
+            if JOB_PATTERN.fullmatch(path.parent.name) and path.is_file():
+                path.unlink(missing_ok=True)
         store.recover()
         stop.clear()
         app.state.worker = threading.Thread(target=work, daemon=True, name='alignment-worker')
@@ -266,7 +284,8 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         directory.mkdir(mode=0o700)
         try:
             size = 0
-            with (directory / ('audio' + suffix)).open('wb') as target:
+            original = directory / ('.upload-' + uuid.uuid4().hex + suffix)
+            with original.open('wb') as target:
                 while True:
                     chunk = await audio.read(1024 * 1024)
                     if not chunk:
@@ -277,6 +296,11 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
                     target.write(chunk)
             if size == 0:
                 raise HTTPException(400, '音频文件为空')
+            try:
+                await run_in_threadpool(convert, original, directory / 'normalized.wav')
+            except ValueError as exc:
+                raise HTTPException(400, f'音频转换失败：{exc}') from exc
+            original.unlink()
             (directory / 'input.txt').write_text(decoded, encoding='utf-8')
             store.create(job_id, language, Path(audio.filename or 'audio').stem[:200] + suffix, user['id'])
         except BaseException:
@@ -298,7 +322,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         job = get_job(job_id, user)
         if job['status'] != 'failed':
             raise HTTPException(409, '只有失败的任务可以重试')
-        if not (job_dir(job_id) / ('audio' + Path(job['audio_name']).suffix.lower())).is_file() or not (job_dir(job_id) / 'input.txt').is_file():
+        if not job_audio(job).is_file() or not (job_dir(job_id) / 'input.txt').is_file():
             raise HTTPException(404, '输入文件不存在')
         if not store.retry(job_id):
             raise HTTPException(409, '任务状态已改变')
@@ -324,7 +348,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
     def input_file(job_id: str, kind: str, user: dict = Depends(require_account)):
         job = get_job(job_id, user)
         if kind == 'audio':
-            path = job_dir(job_id) / ('audio' + Path(job['audio_name']).suffix.lower())
+            path = job_audio(job)
         elif kind == 'text':
             path = job_dir(job_id) / 'input.txt'
         else:

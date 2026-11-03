@@ -31,7 +31,7 @@ export ALIGN_DEVICE=cuda:0
 
 CSV、文本的 `start` 和 `end` 单位均为秒，TextGrid 使用 `sentences` interval tier。处理流程与原脚本一致：转换为 16 kHz 单声道，使用 Silero VAD 检测语音，以 MMS 对齐文本，再根据静音区间修正句子边界。原脚本中的 ASR 识别和文字复核代码处于注释状态，不属于其实际执行流程。
 
-网页默认使用 `zh_cn` 形式的语种地区代码，输入中文名、英文名、地区代码或 ISO 代码即可搜索。目录包含 145 个地区选项、97 个语种；也可直接输入三字母 ISO 639-3 代码。语言信息参考 [MMS ISO 信息表](https://github.com/MXuer/mms-alignment-tools/blob/main/MMS_ISO_Information.md)。
+网页默认使用 `zh_cn` 形式的语种地区代码，输入中文名、英文名、地区代码或 ISO 代码即可搜索。目录包含 172 个地区选项、123 个语种；也可直接输入三字母 ISO 639-3 代码。语言信息参考 [MMS ISO 信息表](https://github.com/MXuer/mms-alignment-tools/blob/main/MMS_ISO_Information.md)。
 
 ## 网页和 API
 
@@ -41,9 +41,9 @@ CSV、文本的 `start` 和 `end` 单位均为秒，TextGrid 使用 `sentences` 
 python -m alignment_web.app
 ```
 
-在服务器本机打开 `http://127.0.0.1:10076/`，或在同一网络的 MacBook 上打开 `http://服务器IP:10076/`。上传音频并填写文本或上传文本文件，选择语言后提交。任务单进程排队执行，可查看状态、输入和结果，下载三种格式，删除已完成或失败的任务。任务与文件默认保存在 `service_data/`；进程重启时未完成的运行中任务会标记失败，排队任务会继续。
+在服务器本机打开 `http://127.0.0.1:10076/`，或在同一网络的 MacBook 上打开 `http://服务器IP:10076/`。上传音频并填写文本或上传文本文件，选择语言后提交。上传的音频会先转换并验证为 16 kHz 单声道 WAV，成功后删除原上传文件，仅保留转换后的音频供对齐、试听和重试。任务单进程排队执行，可查看状态、输入和结果，下载三种格式，删除已完成或失败的任务。任务与文件默认保存在 `service_data/`；进程重启时未完成的运行中任务会标记失败，排队任务会继续。
 
-用户使用 `@dataoceanai.com` 企业邮箱接收验证码登录，首次验证时自动创建账号。默认管理员为 `duhu@dataoceanai.com`，可管理用户状态和管理员权限；普通用户只能访问自己的任务，迁移前的无主任务由管理员查看。网页的“API 密钥”可创建和撤销个人密钥，密钥明文只显示一次。不要以多个服务进程共享同一任务目录运行。音频默认上限为 2048 MiB，文本上限为 2 MiB。
+用户输入邮箱用户名，系统自动补全 `@dataoceanai.com`，通过验证码登录，首次验证时自动创建账号。管理员账号为 `duhu`，可管理用户状态和管理员权限；普通用户只能访问自己的任务，迁移前的无主任务由管理员查看。网页的“API 密钥”可创建和撤销个人密钥，密钥明文只显示一次。不要以多个服务进程共享同一任务目录运行。音频默认上限为 2048 MiB，文本上限为 2 MiB。
 
 ### 账户服务
 
@@ -79,7 +79,7 @@ curl -H "Authorization: Bearer $ALIGN_API_KEY" http://127.0.0.1:10076/v1/jobs/JO
 curl -O -J -H "Authorization: Bearer $ALIGN_API_KEY" http://127.0.0.1:10076/v1/jobs/JOB_ID/artifacts/csv
 ```
 
-也可以用 `text` 表单字段直接提交文本。`GET /v1/jobs` 列出任务，`GET /v1/languages` 返回常用语言，`DELETE /v1/jobs/{id}` 删除已结束任务及文件。服务需有足够的磁盘空间来保存上传内容和转换音频，清理任务会删除其输入和输出。
+也可以用 `text` 表单字段直接提交文本。`POST /v1/jobs` 在音频转码完成并进入队列后返回 `202`，无法解码的音频返回 `400`。`GET /v1/jobs` 列出任务，`GET /v1/languages` 返回常用语言，`DELETE /v1/jobs/{id}` 删除已结束任务及文件。服务需有足够的磁盘空间来暂存上传内容和保存转换音频，清理任务会删除其输入和输出。
 
 ## 命令行
 

@@ -41,6 +41,15 @@ def test_email_verification_cookie_csrf_and_logout(tmp_path):
     assert client.get('/api/auth/me').status_code == 401
 
 
+def test_username_prefix_and_duhu_admin(tmp_path):
+    client, sent, store = make_client(tmp_path)
+    assert client.post('/api/auth/request-code', json={'email': 'DuHu'}).status_code == 200
+    response = client.post('/api/auth/verify-code', json={'email': 'duhu', 'code': sent['duhu@dataoceanai.com']})
+    assert response.status_code == 200
+    assert response.json()['user']['username'] == 'duhu'
+    assert response.json()['user']['is_admin'] is True
+
+
 def test_admin_permissions_and_disable_revoke_session(tmp_path):
     admin, sent, store = make_client(tmp_path)
     person = TestClient(admin.app)

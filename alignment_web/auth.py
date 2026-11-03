@@ -23,6 +23,8 @@ router = APIRouter(prefix='/api')
 
 def normalize_email(value):
     value = str(value or '').strip().lower()
+    if value and '@' not in value:
+        value += '@dataoceanai.com'
     if not EMAIL_PATTERN.fullmatch(value) or '..' in value or value.split('@')[0].endswith('.'):
         return None
     return value

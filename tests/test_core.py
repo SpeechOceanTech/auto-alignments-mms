@@ -42,18 +42,30 @@ class CoreTests(unittest.TestCase):
             (root / 'audio.wav').write_bytes(b'audio')
             (root / 'input.txt').write_text('hello', encoding='utf-8')
             # Exercise orchestration without requiring the large model or ffmpeg.
-            with patch('alignment_core.subprocess.run') as run, patch('alignment_core.romanize', return_value=[list('hello')]) as roman, patch('alignment_core._alignment', return_value=([(0.1, 1.0)], 1.2)), patch('alignment_core.speech_timestamps', return_value=[(0.1, 1.0)]):
+            with patch('alignment_core.convert_audio') as convert, patch('alignment_core.romanize', return_value=[list('hello')]) as roman, patch('alignment_core._alignment', return_value=([(0.1, 1.0)], 1.2)), patch('alignment_core.speech_timestamps', return_value=[(0.1, 1.0)]):
                 result = align(root / 'audio.wav', root / 'input.txt', 'en_us', root / 'output')
             self.assertEqual(roman.call_args.args[1], 'eng')
             self.assertEqual(set(result), {'csv', 'txt', 'textgrid'})
             self.assertTrue(all(path.is_file() for path in result.values()))
-            self.assertEqual(run.call_args.args[0][0], 'ffmpeg')
+            self.assertEqual(convert.call_args.args[0], root / 'audio.wav')
 
     def test_ctc_blank_padding_matches_original_inclusive_frames(self):
         # star, blank, two transcript letters, blank, star
         path = [9, 9, 0, 0, 0, 1, 1, 0, 2, 2, 0, 0, 0, 0, 9]
         times = _times_from_path(path, [9, 1, 2, 9], [(1, 3)], 0, 0.02)
         self.assertEqual(times, [(0.06, 0.22)])
+
+    def test_preconverted_audio_is_reused(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            audio = root / 'normalized.wav'
+            audio.write_bytes(b'fixture')
+            (root / 'input.txt').write_text('hello')
+            with patch('alignment_core.convert_audio') as convert, patch('alignment_core.romanize', return_value=[list('hello')]), patch('alignment_core._alignment', return_value=([(0.1, 1.0)], 1.2)) as alignment, patch('alignment_core.speech_timestamps', return_value=[(0.1, 1.0)]) as vad:
+                align(audio, root / 'input.txt', 'en_us', root / 'output', already_converted=True)
+            convert.assert_not_called()
+            self.assertEqual(alignment.call_args.args[0], audio)
+            self.assertEqual(vad.call_args.args[0], audio)
 
     def test_silence_refinement_and_overlap(self):
         self.assertEqual(refine_times([(0.9, 2.1), (2.0, 3.9)], [(1., 2.), (2.4, 4.)], 5.), [(0.5, 2.2), (2.2, 4.5)])

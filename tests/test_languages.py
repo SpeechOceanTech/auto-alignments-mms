@@ -16,6 +16,9 @@ class LanguageTests(unittest.TestCase):
         self.assertEqual(normalize_language("英语"), "eng")
         self.assertEqual(normalize_language("Japanese"), "jpn")
         self.assertEqual(normalize_language("or_in"), "ory")
+        self.assertEqual(normalize_language("宿务语"), "ceb")
+        self.assertEqual(normalize_language("mg_mg"), "mlg")
+        self.assertEqual(canonical_locale("Cebuano"), "ceb_ph")
 
     def test_free_input_and_invalid_values(self):
         self.assertEqual(normalize_language("KIK"), "kik")
@@ -34,6 +37,7 @@ class LanguageTests(unittest.TestCase):
         codes = [item["code"] for item in COMMON_LANGUAGES]
         self.assertEqual(len(codes), len(set(codes)))
         self.assertGreater(len(codes), 120)
+        self.assertGreaterEqual(len({item['iso'] for item in COMMON_LANGUAGES}), 100)
         for item in COMMON_LANGUAGES:
             self.assertEqual(canonical_locale(item['code']), item['code'])
             self.assertEqual(normalize_language(item['code']), item['iso'])

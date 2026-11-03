@@ -60,7 +60,8 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
                 result[name] = output / ('actual.' + name)
                 result[name].write_text('id,start,end,text\n1,0.123,0.456,one\n2,0.5,1.0,two\n' if name == 'csv' else name)
             return result
-        self.app = create_app(data_dir=self.temp.name, runner=runner, max_audio_bytes=8)
+        self.app = create_app(data_dir=self.temp.name, runner=runner, max_audio_bytes=8,
+                              converter=lambda source, target: target.write_bytes(source.read_bytes()))
         self.user = {'id': 'test-user', 'is_admin': False}
         self.app.dependency_overrides[require_account] = lambda: self.user
         self.lifespan = self.app.router.lifespan_context(self.app)
@@ -92,6 +93,10 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job['status'], 'completed')
         self.assertEqual(set(job['artifacts']), {'csv', 'textgrid', 'txt'})
         url = '/v1/jobs/' + job['id']
+        directory = Path(self.temp.name) / 'jobs' / job['id']
+        self.assertEqual({p.name for p in directory.iterdir()}, {'normalized.wav', 'input.txt', 'output'})
+        status, content = await call(self.app, 'GET', url + '/input/audio')
+        self.assertEqual((status, content), (200, b'audio'))
         status, content = await call(self.app, 'GET', url + '/artifacts/textgrid')
         self.assertEqual((status, content), (200, b'textgrid'))
         status, content = await call(self.app, 'GET', url + '/input/text')

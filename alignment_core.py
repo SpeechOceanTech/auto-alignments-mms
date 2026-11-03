@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import wave
 
 from alignment_languages import normalize_language
 from alignment_support.text_normalization import text_normalize
@@ -223,7 +224,27 @@ def write_outputs(sentences, times, duration, output_dir):
     return paths
 
 
-def align(audio_path, text_path, language, output_dir):
+def convert_audio(audio_path, destination):
+    """Decode audio into a validated, nonempty 16 kHz mono PCM WAV."""
+    try:
+        subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i", str(audio_path),
+                        "-ar", str(SAMPLE_RATE), "-ac", "1", "-c:a", "pcm_s16le",
+                        "-y", str(destination)], capture_output=True, text=True, check=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError("ffmpeg is required to decode audio") from exc
+    except subprocess.CalledProcessError as exc:
+        raise ValueError(f"Unable to decode audio: {exc.stderr.strip()}") from exc
+    try:
+        with wave.open(str(destination), 'rb') as wav:
+            if (wav.getframerate() != SAMPLE_RATE or wav.getnchannels() != 1
+                    or wav.getsampwidth() != 2 or wav.getnframes() == 0
+                    or len(wav.readframes(1)) != 2):
+                raise ValueError("Converted audio must be nonempty 16 kHz mono PCM")
+    except (wave.Error, EOFError) as exc:
+        raise ValueError("Converted audio is not a valid WAV file") from exc
+
+
+def align(audio_path, text_path, language, output_dir, *, already_converted=False):
     """Align a recording and UTF-8 transcript. Return output paths by format.
 
     `language` may be an MMS ISO code or a supported locale alias.
@@ -236,12 +257,10 @@ def align(audio_path, text_path, language, output_dir):
     tokens = romanize(sentences, language)
     with tempfile.TemporaryDirectory(prefix="mms-align-") as temp:
         wav = Path(temp) / "audio.wav"
-        try:
-            proc = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i", str(audio_path), "-ar", str(SAMPLE_RATE), "-ac", "1", "-y", str(wav)], capture_output=True, text=True, check=True)
-        except FileNotFoundError as exc:
-            raise RuntimeError("ffmpeg is required to decode audio") from exc
-        except subprocess.CalledProcessError as exc:
-            raise ValueError(f"Unable to decode audio: {exc.stderr.strip()}") from exc
+        if already_converted:
+            wav = audio_path
+        else:
+            convert_audio(audio_path, wav)
         speech = speech_timestamps(wav)
         times, duration = _alignment(wav, tokens)
         times = refine_times(times, speech, duration)

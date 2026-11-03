@@ -25,7 +25,8 @@ class AccountJobIntegrationTest(unittest.TestCase):
                     results[kind] = path
                 return results
 
-            app = create_app(data_dir=temp, runner=runner, auth_store=auth)
+            app = create_app(data_dir=temp, runner=runner, auth_store=auth,
+                             converter=lambda source, target: target.write_bytes(source.read_bytes()))
             with TestClient(app) as alice:
                 bob = TestClient(app)
                 self.assertEqual(alice.get('/v1/jobs').status_code, 401)
