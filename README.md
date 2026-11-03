@@ -29,7 +29,7 @@ export ALIGN_DEVICE=cuda:0
 
 文本文件使用 UTF-8，每个非空行是一句，也可使用 `ID<TAB>句子`。句子应与录音内容及顺序尽量一致；长句和与音频不一致的文本会影响效果。强制对齐不是语音识别，不会校正转写。数字和标点在对齐内部会被归一化，输出保留原文；无法归一化为有效字符的句子会报错。
 
-CSV、文本的 `start` 和 `end` 单位均为秒，TextGrid 使用 `sentences` interval tier。结果是模型估计值，建议抽检边界，尤其是嘈杂音频或转写不完整时。与原有脚本相比，当前版本使用 MMS 直接估计边界，尚未接入原先的 Silero VAD 二次修正与 ASR 复核，结果不保证逐项一致。模型逐段计算声学特征，但整段文本的 CTC 对齐仍有内存开销，超长录音可先按段拆分。
+CSV、文本的 `start` 和 `end` 单位均为秒，TextGrid 使用 `sentences` interval tier。处理流程与原脚本一致：转换为 16 kHz 单声道，使用 Silero VAD 检测语音，以 MMS 对齐文本，再根据静音区间修正句子边界。原脚本中的 ASR 识别和文字复核代码处于注释状态，不属于其实际执行流程。
 
 常用语言可在网页中选择，也可输入三字母 ISO 639-3 代码，例如 `cmn`、`eng`、`jpn`；支持常见两字母代码和地区码（如 `zh_cn`、`en_us`）。自由输入只验证代码格式，不保证模型对所有语言的覆盖或准确性。语言信息参考 [MMS ISO 信息表](https://github.com/MXuer/mms-alignment-tools/blob/main/MMS_ISO_Information.md)。
 
@@ -39,24 +39,24 @@ CSV、文本的 `start` 和 `end` 单位均为秒，TextGrid 使用 `sentences` 
 python -m alignment_web.app
 ```
 
-浏览器打开 `http://127.0.0.1:8000/`。上传音频并填写文本或上传文本文件，选择语言后提交。任务单进程排队执行，可查看状态、输入和结果，下载三种格式，删除已完成或失败的任务。任务与文件默认保存在 `service_data/`；进程重启时未完成的运行中任务会标记失败，排队任务会继续。
+在服务器本机打开 `http://127.0.0.1:10076/`，或在同一网络的 MacBook 上打开 `http://服务器IP:10076/`。上传音频并填写文本或上传文本文件，选择语言后提交。任务单进程排队执行，可查看状态、输入和结果，下载三种格式，删除已完成或失败的任务。任务与文件默认保存在 `service_data/`；进程重启时未完成的运行中任务会标记失败，排队任务会继续。
 
-默认仅监听本机，**没有登录、权限隔离或用户配额**；多人或公网使用前需在可信的网关后配置认证、访问控制和传输加密。不要以多个服务进程共享同一任务目录运行。音频默认上限为 2048 MiB，文本上限为 2 MiB。可通过环境变量配置：
+默认监听所有网络接口，服务没有登录、权限隔离或用户配额。不要以多个服务进程共享同一任务目录运行。音频默认上限为 2048 MiB，文本上限为 2 MiB。可通过环境变量配置：
 
 | 变量 | 默认值 | 作用 |
 | --- | --- | --- |
-| `ALIGN_WEB_HOST` | `127.0.0.1` | 监听地址 |
-| `ALIGN_WEB_PORT` | `8000` | 监听端口 |
+| `ALIGN_WEB_HOST` | `0.0.0.0` | 监听地址 |
+| `ALIGN_WEB_PORT` | `10076` | 监听端口 |
 | `ALIGN_WEB_DATA_DIR` | `service_data` | 任务和上传文件存储目录 |
 | `ALIGN_WEB_MAX_AUDIO_MB` | `2048` | 音频大小上限，单位 MiB |
 
 接口文档位于 `/docs`。例如：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/jobs \
+curl -X POST http://127.0.0.1:10076/v1/jobs \
   -F 'audio=@audio.wav' -F 'text_file=@sentences.txt' -F 'language=cmn'
-curl http://127.0.0.1:8000/v1/jobs/JOB_ID
-curl -O -J http://127.0.0.1:8000/v1/jobs/JOB_ID/artifacts/csv
+curl http://127.0.0.1:10076/v1/jobs/JOB_ID
+curl -O -J http://127.0.0.1:10076/v1/jobs/JOB_ID/artifacts/csv
 ```
 
 也可以用 `text` 表单字段直接提交文本。`GET /v1/jobs` 列出任务，`GET /v1/languages` 返回常用语言，`DELETE /v1/jobs/{id}` 删除已结束任务及文件。服务需有足够的磁盘空间来保存上传内容和转换音频，清理任务会删除其输入和输出。
@@ -69,7 +69,7 @@ python align_cli.py audio.wav sentences.txt cmn output/
 
 运行测试：`python -m unittest discover -s tests -v`。
 
-已用本机 MMS 权重、PyTorch/torchaudio 2.6 和 GPU 对一段 11.808 秒英语录音进行端到端冒烟测试，生成三种格式并得到 0.861–11.268 秒的句子区间。此测试只包含一句话，不能代表多句长录音的边界准确率或与旧版 VAD 流程的等价性。
+使用本机 MMS 权重、PyTorch/torchaudio 和 GPU 可运行真实音频的端到端测试。
 
 ## 来源
 

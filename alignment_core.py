@@ -17,6 +17,7 @@ import tempfile
 
 from alignment_languages import normalize_language
 from alignment_support.text_normalization import text_normalize
+from alignment_vad import refine_times, speech_timestamps
 
 ROOT = Path(__file__).resolve().parent
 SAMPLE_RATE = 16000
@@ -149,21 +150,38 @@ def _alignment(wav, tokens):
             path, _ = torchaudio.functional.forced_align(emission.unsqueeze(0), target_tensor, blank=dictionary["<blank>"])
         except (AttributeError, RuntimeError) as exc:
             raise RuntimeError(f"MMS forced alignment failed: {exc}") from exc
-    # Collapse CTC repeats and retain frame positions; repeated identical target
-    # tokens are separated by a blank, as required by CTC.
-    values = path[0].cpu().tolist()
+    return _times_from_path(path[0].cpu().tolist(), target, spans,
+                            dictionary["<blank>"], stride), duration
+
+
+def _times_from_path(values, target, spans, blank, stride):
+    """Reproduce align_utils.merge_repeats/get_spans, including blank padding."""
     segments = []
     pos = 0
     while pos < len(values):
         end = pos + 1
         while end < len(values) and values[end] == values[pos]:
             end += 1
-        if values[pos] != dictionary["<blank>"]:
-            segments.append((values[pos], pos, end))
+        # Original merge_repeats stores an inclusive final frame.
+        segments.append((values[pos], pos, end - 1))
         pos = end
-    if [x[0] for x in segments] != target:
+    token_indices = [i for i, seg in enumerate(segments) if seg[0] != blank]
+    if [segments[i][0] for i in token_indices] != target:
         raise RuntimeError("MMS output did not match all transcript tokens")
-    return [(segments[a][1] * stride, min(duration, segments[b - 1][2] * stride)) for a, b in spans], duration
+    result = []
+    for a, b in spans:
+        first, last = token_indices[a], token_indices[b - 1]
+        start, end = segments[first][1], segments[last][2]
+        # Sentence tokens are surrounded by star tokens, so they are never the
+        # first or last span; original get_spans uses blank midpoints here.
+        if first > 0 and segments[first - 1][0] == blank:
+            prev = segments[first - 1]
+            start = (prev[1] + prev[2]) // 2
+        if last + 1 < len(segments) and segments[last + 1][0] == blank:
+            following = segments[last + 1]
+            end = (following[1] + following[2]) // 2
+        result.append((start * stride, end * stride))
+    return result
 
 
 def write_outputs(sentences, times, duration, output_dir):
@@ -171,7 +189,7 @@ def write_outputs(sentences, times, duration, output_dir):
         raise ValueError("Number of sentence timings does not match transcript")
     previous = 0.0
     for start, end in times:
-        if not all(math.isfinite(t) for t in (start, end)) or not 0 <= previous <= start < end <= duration + 1e-6:
+        if not all(math.isfinite(t) for t in (start, end)) or not 0 <= previous <= start <= end <= duration + 1e-6:
             raise ValueError("Invalid or overlapping sentence timings")
         previous = end
     output = Path(output_dir)
@@ -224,5 +242,7 @@ def align(audio_path, text_path, language, output_dir):
             raise RuntimeError("ffmpeg is required to decode audio") from exc
         except subprocess.CalledProcessError as exc:
             raise ValueError(f"Unable to decode audio: {exc.stderr.strip()}") from exc
+        speech = speech_timestamps(wav)
         times, duration = _alignment(wav, tokens)
+        times = refine_times(times, speech, duration)
     return write_outputs(sentences, times, duration, output_dir)

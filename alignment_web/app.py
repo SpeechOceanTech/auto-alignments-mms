@@ -1,4 +1,4 @@
-"""Single-process local HTTP service. No authentication is provided."""
+"""Single-process HTTP service. No authentication is provided."""
 import logging
 import os
 import re
@@ -69,7 +69,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None):
     execute = runner or _default_runner
     stop = threading.Event()
     wake = threading.Event()
-    app = FastAPI(title='MMS Audio Alignment API', description='本地服务：无身份认证，请勿直接公开到网络。')
+    app = FastAPI(title='MMS Audio Alignment API', description='长音频与文本自动对齐服务。')
     app.add_middleware(LimitBody, max_bytes=max_audio_bytes + TEXT_LIMIT + FORM_OVERHEAD)
     app.mount('/static', StaticFiles(directory=STATIC_ROOT), name='static')
     app.state.store = store
@@ -242,8 +242,8 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None):
 
 def main():
     import uvicorn
-    uvicorn.run(create_app(), host=os.environ.get('ALIGN_WEB_HOST', '127.0.0.1'),
-                port=int(os.environ.get('ALIGN_WEB_PORT', '8000')))
+    uvicorn.run(create_app(), host=os.environ.get('ALIGN_WEB_HOST', '0.0.0.0'),
+                port=int(os.environ.get('ALIGN_WEB_PORT', '10076')))
 
 
 if __name__ == '__main__':
