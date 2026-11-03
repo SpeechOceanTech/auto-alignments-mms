@@ -190,7 +190,7 @@ class AuthStore:
         with self.connect() as db:
             digest = self.digest('api_key', token)
             row = db.execute('''SELECT u.* FROM users u JOIN api_keys k ON u.id=k.user_id
-                WHERE k.digest=? AND u.is_active=1''', (digest,)).fetchone()
+                WHERE k.digest=? AND u.is_active=1 AND u.is_admin=1''', (digest,)).fetchone()
             if row is not None:
                 db.execute('UPDATE api_keys SET last_used_at=? WHERE digest=?', (self.clock(), digest))
         return self._public(row) if row else None
@@ -332,12 +332,12 @@ def update_user(user_id: str, request: Request, payload: dict, user: dict = Depe
 
 
 @router.get('/auth/api-keys')
-def list_api_keys(request: Request, user: dict = Depends(require_session)):
+def list_api_keys(request: Request, user: dict = Depends(require_admin)):
     return {'keys': request.app.state.auth_store.list_api_keys(user['id'])}
 
 
 @router.post('/auth/api-keys')
-def create_api_key(request: Request, response: Response, payload: dict, user: dict = Depends(require_session)):
+def create_api_key(request: Request, response: Response, payload: dict, user: dict = Depends(require_admin)):
     try:
         result = request.app.state.auth_store.create_api_key(user['id'], payload.get('name'))
     except ValueError as exc:
@@ -347,7 +347,7 @@ def create_api_key(request: Request, response: Response, payload: dict, user: di
 
 
 @router.delete('/auth/api-keys/{key_id}')
-def revoke_api_key(key_id: str, request: Request, user: dict = Depends(require_session)):
+def revoke_api_key(key_id: str, request: Request, user: dict = Depends(require_admin)):
     if not request.app.state.auth_store.revoke_api_key(user['id'], key_id):
         raise HTTPException(404, '密钥不存在')
     return {'ok': True}

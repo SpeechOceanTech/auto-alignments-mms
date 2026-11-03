@@ -57,10 +57,14 @@ class AccountJobIntegrationTest(unittest.TestCase):
                 self.assertEqual(bob.get('/v1/jobs').json()['total'], 0)
                 self.assertNotIn('owner_username', alice.get('/v1/jobs').json()['jobs'][0])
                 self.assertEqual(admin.get('/v1/jobs').json()['jobs'][0]['owner_username'], 'alice')
-                key = alice.post('/api/auth/api-keys', json={'name': 'test'}, headers=alice_headers)
+                # Simulate a user key issued before key management became admin-only.
+                alice_id = alice.get('/api/auth/me').json()['user']['id']
+                legacy_key = auth.create_api_key(alice_id, 'legacy')
+                api = TestClient(app)
+                self.assertEqual(api.get('/v1/jobs/' + job_id, headers={'authorization': 'Bearer ' + legacy_key['token']}).status_code, 401)
+                key = admin.post('/api/auth/api-keys', json={'name': 'test'}, headers=admin_headers)
                 self.assertEqual(key.status_code, 200)
                 token = key.json()['token']
-                api = TestClient(app)
                 bearer = {'authorization': 'Bearer ' + token}
                 self.assertEqual(api.get('/v1/jobs/' + job_id, headers=bearer).status_code, 200)
                 self.assertEqual(api.get('/api/auth/api-keys', headers=bearer).status_code, 403)
@@ -69,9 +73,10 @@ class AccountJobIntegrationTest(unittest.TestCase):
                 self.assertEqual(bob.delete('/v1/jobs/' + job_id, headers=bob_headers).status_code, 404)
                 self.assertEqual(alice.delete('/v1/jobs/' + job_id).status_code, 403)
                 self.assertEqual(alice.delete('/v1/jobs/' + job_id, headers=alice_headers).status_code, 403)
-                self.assertEqual(api.delete('/v1/jobs/' + job_id, headers=bearer).status_code, 403)
+                self.assertEqual(api.delete('/v1/jobs/' + job_id, headers={'authorization': 'Bearer ' + legacy_key['token']}).status_code, 401)
                 self.assertEqual(admin.delete('/v1/jobs/' + job_id, headers=admin_headers).status_code, 200)
-                self.assertEqual(alice.delete('/api/auth/api-keys/' + key.json()['key']['id'], headers=alice_headers).status_code, 200)
+                self.assertEqual(alice.delete('/api/auth/api-keys/' + legacy_key['key']['id'], headers=alice_headers).status_code, 403)
+                self.assertEqual(admin.delete('/api/auth/api-keys/' + key.json()['key']['id'], headers=admin_headers).status_code, 200)
                 self.assertEqual(api.get('/v1/jobs', headers=bearer).status_code, 401)
 
 

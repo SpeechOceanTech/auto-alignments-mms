@@ -89,6 +89,7 @@ def test_api_key_owner_access_revocation_and_no_account_management(tmp_path):
     assert token.startswith('align_')
     stored = store.list_api_keys(session['user']['id'])
     assert stored[0]['id'] == key['id'] and 'token' not in stored[0]
+    assert admin.get('/api/auth/api-keys').json()['keys'][0]['id'] == key['id']
     with store.connect() as db:
         assert token not in tuple(db.execute('SELECT * FROM api_keys').fetchone())
     bearer = {'Authorization': 'Bearer ' + token}
@@ -97,24 +98,40 @@ def test_api_key_owner_access_revocation_and_no_account_management(tmp_path):
     assert admin.get('/api/admin/users', headers=bearer).status_code == 403
     assert admin.get('/api/auth/api-keys', headers=bearer).status_code == 403
     assert admin.post('/api/auth/api-keys', json={'name': 'new'}, headers=bearer).status_code == 403
+    assert admin.delete('/api/auth/api-keys/' + key['id'], headers=bearer).status_code == 403
     assert admin.get('/api/auth/me', headers=bearer).status_code == 403
 
     other = TestClient(admin.app)
     other_session = login(other, sent, 'other@dataoceanai.com')
-    assert other.delete('/api/auth/api-keys/' + key['id'], headers={'x-csrf-token': other_session['csrf_token']}).status_code == 404
+    other_csrf = {'x-csrf-token': other_session['csrf_token']}
+    legacy_key = store.create_api_key(other_session['user']['id'], 'legacy')
+    assert other.get('/api/auth/api-keys').status_code == 403
+    assert other.post('/api/auth/api-keys', json={'name': 'new'}, headers=other_csrf).status_code == 403
+    assert other.delete('/api/auth/api-keys/' + legacy_key['key']['id'], headers=other_csrf).status_code == 403
+    assert other.delete('/api/auth/api-keys/' + key['id'], headers=other_csrf).status_code == 403
     assert admin.delete('/api/auth/api-keys/' + key['id'], headers=csrf).status_code == 200
     assert admin.post('/private', headers=bearer).status_code == 401
 
 
-def test_api_key_stops_working_when_user_is_disabled(tmp_path):
+def test_api_key_requires_active_admin_and_changes_follow_current_role(tmp_path):
     admin, sent, store = make_client(tmp_path)
     person = TestClient(admin.app)
     person_session = login(person, sent, 'person@dataoceanai.com')
-    result = person.post('/api/auth/api-keys', json={'name': 'task runner'},
-                         headers={'x-csrf-token': person_session['csrf_token']}).json()
+    # A key issued before the policy change cannot authenticate a regular user.
+    result = store.create_api_key(person_session['user']['id'], 'task runner')
     bearer = {'Authorization': 'Bearer ' + result['token']}
-    assert person.post('/private', headers=bearer).status_code == 200
+    assert person.post('/private', headers=bearer).status_code == 401
     admin_session = login(admin, sent, 'duhu@dataoceanai.com')
+    admin_headers = {'x-csrf-token': admin_session['csrf_token']}
+    assert admin.patch('/api/admin/users/' + person_session['user']['id'], json={'is_admin': True},
+                       headers=admin_headers).status_code == 200
+    assert person.post('/private', headers=bearer).status_code == 200
+    assert admin.patch('/api/admin/users/' + person_session['user']['id'], json={'is_admin': False},
+                       headers=admin_headers).status_code == 200
+    assert person.post('/private', headers=bearer).status_code == 401
+    assert admin.patch('/api/admin/users/' + person_session['user']['id'], json={'is_admin': True},
+                       headers=admin_headers).status_code == 200
+    assert person.post('/private', headers=bearer).status_code == 200
     assert admin.patch('/api/admin/users/' + person_session['user']['id'], json={'is_active': False},
-                       headers={'x-csrf-token': admin_session['csrf_token']}).status_code == 200
+                       headers=admin_headers).status_code == 200
     assert person.post('/private', headers=bearer).status_code == 401
