@@ -236,12 +236,14 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
             status, content = await call(self.app, 'GET', f'/v1/jobs/{job_id}/sentences')
             self.assertEqual(status, 200)
             self.assertEqual(json.loads(content), [sentence])
-            status, content = await call(self.app, 'GET', f'/v1/jobs/{job_id}/artifacts/csv')
+            status, content, headers = await call(self.app, 'GET', f'/v1/jobs/{job_id}/artifacts/csv?format_version=audition-v2', include_headers=True)
             self.assertEqual(status, 200)
+            self.assertEqual(headers[b'cache-control'], b'no-store')
             check_csv(content, row)
 
-        status, content = await call(self.app, 'GET', '/v1/jobs/bulk-artifacts.zip?job_ids=' + ','.join(ids))
+        status, content, headers = await call(self.app, 'GET', '/v1/jobs/bulk-artifacts.zip?job_ids=' + ','.join(ids) + '&format_version=audition-v2', include_headers=True)
         self.assertEqual(status, 200)
+        self.assertEqual(headers[b'cache-control'], b'no-store')
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             check_csv(archive.read('old.csv'), expected_rows[0])
             check_csv(archive.read('new.csv'), expected_rows[1])

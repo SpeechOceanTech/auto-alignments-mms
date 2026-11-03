@@ -359,6 +359,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
             Path(temporary.name).unlink(missing_ok=True)
             raise
         return FileResponse(temporary.name, filename='alignment-results.zip', media_type='application/zip',
+                            headers={'Cache-Control': 'no-store'},
                             background=BackgroundTask(Path(temporary.name).unlink, missing_ok=True))
 
     @app.post('/v1/jobs', status_code=202)
@@ -486,7 +487,8 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         filename = f'{_download_stem(job["audio_name"])}{Path(FORMATS[kind]).suffix}'
         if kind == 'csv':
             return Response(_audition_export(path), media_type='application/octet-stream',
-                            headers={'Content-Disposition': _attachment_disposition(filename)})
+                            headers={'Content-Disposition': _attachment_disposition(filename),
+                                     'Cache-Control': 'no-store'})
         return FileResponse(path, filename=filename,
                             media_type='application/octet-stream')
 
