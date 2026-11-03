@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">长音频文本对齐服务</title>
+  <rect width="64" height="64" rx="15" fill="#116d6e"/>
+  <path d="M12 29v6m8-13v20m8-29v38m8-30v22m8-28v34m8-20v6" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+</svg>

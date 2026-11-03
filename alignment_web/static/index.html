@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>长音频文本对齐服务</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -43,7 +44,7 @@
           <div class="field" id="filter-owner-field" hidden><label for="filter-owner">用户</label><select id="filter-owner"><option value="">全部用户</option><option value="__legacy__">历史任务（无用户）</option></select></div>
           <div class="field"><label for="filter-status">状态</label><select id="filter-status"><option value="">全部状态</option><option value="queued">排队中</option><option value="running">对齐中</option><option value="completed">已完成</option><option value="failed">失败</option></select></div>
           <div class="field"><label for="filter-q">文件名 / 任务 ID</label><input id="filter-q" type="search" placeholder="搜索"></div>
-          <div class="field"><label for="filter-from">开始日期</label><input id="filter-from" type="date"></div><div class="field"><label for="filter-to">结束日期</label><input id="filter-to" type="date"></div>
+          <div class="field date-filter"><span class="filter-label" id="date-filter-label">创建日期</span><div class="date-range" role="group" aria-labelledby="date-filter-label"><div class="date-range-endpoint"><label for="filter-from">从</label><input id="filter-from" type="date" aria-label="开始日期"></div><span class="date-range-divider" aria-hidden="true"></span><div class="date-range-endpoint"><label for="filter-to">至</label><input id="filter-to" type="date" aria-label="结束日期"></div></div></div>
           <button id="clear-filters" class="outline" type="button">清除</button>
         </div>
         <div class="jobs-table-wrap"><table><thead><tr><th><input id="select-all" type="checkbox" aria-label="选择所有任务"></th><th>文件</th><th>语种</th><th id="job-user-header" hidden>用户名</th><th>创建时间</th><th>任务 ID</th><th>状态</th><th>操作 / 下载</th></tr></thead><tbody id="jobs"></tbody></table></div>

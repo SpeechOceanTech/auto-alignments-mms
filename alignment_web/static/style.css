@@ -17,3 +17,20 @@
 .review-content{padding:16px;min-width:0}.review-content audio{width:100%}.waveform{display:block;width:100%;height:120px;margin-top:12px;background:#fbfcfe;border:1px solid var(--line);border-radius:6px;cursor:grab;touch-action:none}.waveform:active{cursor:grabbing}.review-content h3{margin:16px 0 8px}.segment-table th:first-child,.segment-table td:first-child{width:1%;white-space:nowrap;overflow-wrap:normal}.segment-table th:nth-child(2),.segment-table th:nth-child(3){width:115px}.segment-table tbody tr{cursor:pointer}.segment-table tbody tr:hover,.segment-table tbody tr:focus{background:#f0f8f7;outline:2px solid #94d2c8;outline-offset:-2px}.segment-table tbody tr.active{background:#d9f0eb}.segment-table td:nth-child(2),.segment-table td:nth-child(3){white-space:nowrap;color:var(--brand);font-variant-numeric:tabular-nums}.review-content details{margin-top:16px}.review-content summary{cursor:pointer;font-weight:700}.review-content pre{margin-top:8px}
 .job-id-button{font-family:monospace;color:var(--brand);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}.job-id-button:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
 @media(min-width:1101px){.job-filters.admin-filters{grid-template-columns:1fr 1fr 1fr 1.3fr 1fr 1fr auto}}
+
+/* Keep the two dates together, while allowing the filters to wrap on smaller screens. */
+.job-filters,.job-filters.admin-filters{display:flex;flex-wrap:wrap;gap:10px}
+.job-filters>.field{flex:1 1 125px;min-width:0}
+.job-filters>.date-filter{flex:1.8 1 320px;min-width:min(100%,320px);max-width:420px}
+.job-filters>#clear-filters{flex:none}
+.filter-label{display:block;margin:0 0 6px;color:var(--muted);font-size:12px;font-weight:700}
+.date-range{display:flex;align-items:center;height:38px;border:1px solid var(--line);border-radius:6px;background:#fff}
+.date-range:focus-within{outline:2px solid #94d2c8;border-color:var(--brand)}
+.date-range-endpoint{display:flex;align-items:center;flex:1 1 0;min-width:0;padding-left:9px}
+.date-range-endpoint label{flex:none;margin:0;color:var(--muted);font-size:12px;font-weight:500}
+.date-range-endpoint input{min-width:0;height:36px;padding:0 6px;border:0;outline:0;background:transparent;font-size:13px;font-variant-numeric:tabular-nums}
+.date-range-endpoint input:focus{outline:0;border:0}
+.date-range-endpoint input::-webkit-calendar-picker-indicator{cursor:pointer;opacity:.65}
+.date-range-endpoint input::-webkit-calendar-picker-indicator:hover{opacity:1}
+.date-range-divider{flex:none;width:1px;height:18px;background:var(--line)}
+@media(max-width:390px){.date-range{height:auto;flex-direction:column;align-items:stretch}.date-range-endpoint{flex:auto}.date-range-divider{width:auto;height:1px;margin:0 9px}}
