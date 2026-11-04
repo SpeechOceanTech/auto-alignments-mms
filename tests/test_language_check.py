@@ -64,7 +64,7 @@ class LanguageCheckTest(unittest.TestCase):
     def test_arabic_varieties_check_script_without_claiming_dialect(self):
         arabic = ('اليوم سنتحدث عن كيفية العمل معًا ومساعدة الجميع على إيجاد حلول '
                   'مناسبة وتحقيق نتائج أفضل في المستقبل. ') * 4
-        for locale in ('ar_001', 'ar_eg'):
+        for locale in ('ar_msa', 'ar_001', 'ar_eg', 'ar_ma', 'ar_dz', 'ar_iq', 'ar_ae', 'ar_jo', 'ar_sa'):
             with self.subTest(locale=locale):
                 self.assertEqual(check_language(locale, CHINESE)['status'], 'mismatch')
                 self.assertNotEqual(check_language(locale, arabic)['status'], 'mismatch')

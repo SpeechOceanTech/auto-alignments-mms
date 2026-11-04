@@ -94,7 +94,7 @@ class JobStore:
             row = db.execute('SELECT * FROM jobs WHERE id=?', (job_id,)).fetchone()
             return dict(row) if row else None
 
-    def list(self, limit, offset, status=None, language=None, q=None, created_from=None, created_to=None, owner_id=None, legacy_language=None, legacy_owner=False, batch_id=None):
+    def list(self, limit, offset, status=None, language=None, q=None, created_from=None, created_to=None, owner_id=None, legacy_language=None, legacy_owner=False, batch_id=None, language_aliases=()):
         conditions, values = [], []
         if legacy_owner:
             conditions.append('owner_id IS NULL')
@@ -108,8 +108,9 @@ class JobStore:
             conditions.append('status=?')
             values.append(status)
         if language:
-            conditions.append('(language=? OR language=?)')
-            values.extend((language, legacy_language or language))
+            languages = list(dict.fromkeys((language, legacy_language or language, *language_aliases)))
+            conditions.append('language IN (' + ','.join('?' for _ in languages) + ')')
+            values.extend(languages)
         if q:
             conditions.append('(instr(lower(audio_name), lower(?)) > 0 OR instr(id, ?) > 0)')
             values.extend((q, q))

@@ -16,7 +16,7 @@ import subprocess
 import tempfile
 import wave
 
-from alignment_languages import normalize_language
+from alignment_languages import ARABIC_ISOS, normalize_language
 from alignment_csv import write_audition_csv
 from alignment_support.text_normalization import text_normalize
 from alignment_vad import refine_times, speech_timestamps
@@ -50,7 +50,7 @@ def romanize(sentences, language):
     # Bracketed annotations are metadata, not spoken words. Keep `sentences`
     # untouched so result files and the review page retain the original text.
     # The Arabic varieties share the legacy Arabic normalizer and uroman rules.
-    processing_language = 'ara' if language in ('arb', 'arz') else language
+    processing_language = 'ara' if language in ARABIC_ISOS else language
     normal = [text_normalize(re.sub(r"【[^】]*】", " ", text), processing_language)
               for _, text in sentences]
     for i, line in enumerate(normal):

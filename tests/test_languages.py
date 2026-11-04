@@ -1,6 +1,6 @@
 import unittest
 
-from alignment_languages import COMMON_LANGUAGES, canonical_locale, normalize_language
+from alignment_languages import COMMON_LANGUAGES, _LANGUAGES, canonical_locale, normalize_language
 
 
 class LanguageTests(unittest.TestCase):
@@ -47,9 +47,27 @@ class LanguageTests(unittest.TestCase):
         nested = next(item for item in COMMON_LANGUAGES if item['code'] == 'ln_cd')
         self.assertEqual((nested['language_name'], nested['region']), ('林加拉语', '刚果（金）'))
 
+    def test_all_previously_offered_locales_remain_selectable(self):
+        choices = {item['code'] for item in COMMON_LANGUAGES}
+        historical = {pair.split(':', 1)[0] for _, _, _, locales, _ in _LANGUAGES for pair in locales.split()}
+        self.assertFalse(historical - choices)
+        self.assertIn('en_sg', choices)
+        self.assertIn('es_co', choices)
+        self.assertIn('zh_sg', choices)
+
     def test_named_varieties_and_legacy_locale_inputs(self):
         choices = {item['code']: item['name'] for item in COMMON_LANGUAGES}
-        self.assertEqual(choices['ar_001'], '现代标准阿拉伯语')
+        self.assertEqual(choices['ar_msa'], '现代标准阿拉伯语')
+        self.assertNotIn('ar_001', choices)
+        self.assertEqual(canonical_locale('ar_001'), 'ar_msa')
+        self.assertEqual(normalize_language('ar_001'), 'arb')
+        self.assertEqual(choices['ar_ma'], '摩洛哥阿拉伯语')
+        self.assertEqual(normalize_language('ar_ma'), 'ary')
+        self.assertEqual(normalize_language('摩洛哥阿拉伯语'), 'ary')
+        self.assertEqual(normalize_language('ar_dz'), 'arq')
+        self.assertEqual(normalize_language('ar_iq'), 'acm')
+        self.assertEqual(normalize_language('ar_ae'), 'afb')
+        self.assertEqual(normalize_language('ar_jo'), 'ajp')
         self.assertEqual(choices['ar_eg'], '埃及阿拉伯语')
         self.assertEqual(normalize_language('标准阿拉伯语'), 'arb')
         self.assertEqual(normalize_language('埃及阿拉伯语'), 'arz')

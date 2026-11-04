@@ -115,8 +115,8 @@ function setupLanguagePicker(inputId, optionsId) {
     matches.forEach((item, index) => {
       const el = node('div', undefined, 'language-option');
       el.id = `${options.id}-${index}`; el.setAttribute('role', 'option'); el.setAttribute('aria-selected', 'false');
-      el.setAttribute('aria-label', `${item.name} ${item.code}`);
-      el.append(node('span', item.name, 'language-name'), node('span', item.code, 'language-code'));
+      el.setAttribute('aria-label', `${item.code} ${item.name}`);
+      el.append(node('span', item.code, 'language-code'), node('span', item.name, 'language-name'));
       el.onmousedown = event => event.preventDefault(); el.onclick = () => choose(index); options.append(el);
     });
     options.hidden = false; input.setAttribute('aria-expanded', 'true');

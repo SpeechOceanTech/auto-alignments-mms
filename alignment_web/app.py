@@ -363,7 +363,8 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
                                  str(created_to) if created_to else None,
                                  owner_id=(None if owner_id == '__legacy__' else owner_id) if user['is_admin'] else user['id'],
                                  legacy_language=legacy_language,
-                                 legacy_owner=owner_id == '__legacy__', batch_id=batch_id)
+                                 legacy_owner=owner_id == '__legacy__', batch_id=batch_id,
+                                 language_aliases=('ar_001',) if language == 'ar_msa' else ())
         jobs = [get_job(job['id'], user) for job in jobs]
         if user['is_admin']:
             owners = {job['owner_id'] for job in jobs if job['owner_id']}
@@ -468,7 +469,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
             batch = get_batch(batch_id, user)
             if batch['owner_id'] != user['id']:
                 raise HTTPException(403, '只能向自己的批次提交任务')
-            if batch['language'] != language or not text_file:
+            if canonical_locale(batch['language']) != language or not text_file:
                 raise HTTPException(400, '批次语种不一致或未上传文本文件')
             item = store.get_batch_item(batch_id, audio.filename, text_file.filename)
             if item is None:

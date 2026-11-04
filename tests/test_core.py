@@ -27,8 +27,9 @@ class CoreTests(unittest.TestCase):
     def test_arabic_varieties_use_legacy_arabic_romanization(self):
         sentences = [('1', 'ٱلسَّلَامُ عَلَيْكُمْ'), ('2', 'كيف حالك اليوم؟')]
         expected = romanize(sentences, 'ara')
-        self.assertEqual(romanize(sentences, 'arb'), expected)
-        self.assertEqual(romanize(sentences, 'arz'), expected)
+        for iso in ('arb', 'arz', 'ary', 'arq', 'acm', 'afb', 'ajp'):
+            with self.subTest(iso=iso):
+                self.assertEqual(romanize(sentences, iso), expected)
 
     def test_bracket_annotations_are_excluded_only_from_alignment(self):
         with tempfile.TemporaryDirectory() as d:

@@ -14,7 +14,7 @@ import unicodedata
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from alignment_languages import COMMON_LANGUAGES, canonical_locale, normalize_language
+from alignment_languages import ARABIC_ISOS, COMMON_LANGUAGES, canonical_locale, normalize_language
 from .auth import require_account
 from . import fasttext_client
 from vendor.langdetect import DetectorFactory, LangDetectException
@@ -33,7 +33,7 @@ _SCRIPT_OVERRIDES = {
     'tgk': {'CYRILLIC'}, 'kaz': {'CYRILLIC', 'LATIN', 'ARABIC'},
     'mon': {'CYRILLIC', 'MONGOLIAN'}, 'srp': {'CYRILLIC', 'LATIN'},
     'uzb': {'CYRILLIC', 'LATIN', 'ARABIC'}, 'aze': {'CYRILLIC', 'LATIN', 'ARABIC'},
-    'ara': {'ARABIC'}, 'arb': {'ARABIC'}, 'arz': {'ARABIC'},
+    **{iso: {'ARABIC'} for iso in ARABIC_ISOS},
     'fas': {'ARABIC'}, 'urd': {'ARABIC'}, 'pus': {'ARABIC'},
     'ckb': {'ARABIC'}, 'uig': {'ARABIC', 'CYRILLIC', 'LATIN'},
     'snd': {'ARABIC', 'DEVANAGARI'}, 'pan': {'GURMUKHI', 'ARABIC'},
@@ -72,10 +72,12 @@ _SCRIPT_LABELS = {'HAN': '汉字', 'LATIN': '拉丁字母', 'CYRILLIC': '西里�
 _RELATED = [
     {'cmn', 'yue', 'nan', 'jpn'}, {'ind', 'zsm'}, {'srp', 'hrv', 'bos'},
     {'nob', 'nno', 'swe', 'dan'}, {'rus', 'ukr', 'bel'}, {'hin', 'mar', 'npi', 'mai', 'awa', 'hne', 'mag'},
-    {'ben', 'asm'}, {'por', 'spa', 'glg', 'cat'}, {'ara', 'arb', 'arz'},
+    {'ben', 'asm'}, {'por', 'spa', 'glg', 'cat'}, ARABIC_ISOS,
 ]
 _DETECT_ALIASES = {'no': 'nb_no', 'zh-cn': 'zh_cn', 'zh-tw': 'zh_tw', 'tl': 'tl_ph'}
 _NAMES = {item['iso']: item['language_name'] for item in COMMON_LANGUAGES}
+# Detectors identify generic Arabic, not a specific country or dialect.
+_NAMES['ara'] = '阿拉伯语'
 _KNOWN_ISOS = set(_NAMES)
 # Malay has no separate model profile. Common function words are used only to
 # suppress an English warning, never to positively identify a language.

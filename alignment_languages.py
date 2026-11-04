@@ -144,8 +144,10 @@ def _key(value):
 COMMON_LANGUAGES = []
 _ALIAS_LOCALES = {}
 _LOCALE_ISOS = {}
-# Explicitly named varieties only: a country code by itself is not enough to
-# establish that the language spoken there is a separate language or dialect.
+# These ISO 639-3 codes share Arabic script and Arabic romanization rules.
+ARABIC_ISOS = frozenset(('ara', 'arb', 'arz', 'ary', 'arq', 'acm', 'afb', 'ajp'))
+# Prefer conventional names where available; other previously offered locales
+# remain selectable using their region and language name.
 # Entries are (locale, display name, optional ISO override, pipe-separated aliases).
 _VARIETIES = {
     'cmn': [('zh_cn', '普通话', None, '汉语普通话|Mandarin Chinese'), ('zh_tw', '台湾国语', None, '台湾普通话|Taiwanese Mandarin')],
@@ -157,8 +159,14 @@ _VARIETIES = {
     'spa': [('es_es', '欧洲西班牙语', None, '西班牙西班牙语'),
             ('es_mx', '墨西哥西班牙语', None, ''), ('es_ar', '阿根廷西班牙语', None, '')],
     'por': [('pt_br', '巴西葡萄牙语', None, '巴葡'), ('pt_pt', '欧洲葡萄牙语', None, '欧葡')],
-    'ara': [('ar_001', '现代标准阿拉伯语', 'arb', '标准阿拉伯语|现代标准阿语|Modern Standard Arabic'),
-            ('ar_eg', '埃及阿拉伯语', 'arz', '埃及阿语|Egyptian Arabic')],
+    'ara': [('ar_msa', '现代标准阿拉伯语', 'arb', 'ar_001|标准阿拉伯语|现代标准阿语|Modern Standard Arabic'),
+            ('ar_sa', '沙特阿拉伯语', None, '沙特阿语|Saudi Arabic'),
+            ('ar_eg', '埃及阿拉伯语', 'arz', '埃及阿语|Egyptian Arabic'),
+            ('ar_iq', '伊拉克阿拉伯语', 'acm', '伊拉克阿语|Iraqi Arabic'),
+            ('ar_ae', '海湾阿拉伯语（阿联酋）', 'afb', '阿联酋阿拉伯语|海湾阿拉伯语|Gulf Arabic'),
+            ('ar_ma', '摩洛哥阿拉伯语', 'ary', '摩洛哥阿语|Moroccan Arabic|Darija'),
+            ('ar_dz', '阿尔及利亚阿拉伯语', 'arq', '阿尔及利亚阿语|Algerian Arabic'),
+            ('ar_jo', '约旦阿拉伯语', 'ajp', '约旦阿语|Jordanian Arabic')],
 }
 
 for iso, name, english, locales, extra in _LANGUAGES:
@@ -175,7 +183,18 @@ for iso, name, english, locales, extra in _LANGUAGES:
         _ALIAS_LOCALES[_key(label)] = locale
 
     regions = dict(options)
-    varieties = _VARIETIES.get(iso, [(preferred, name, None, '')])
+    varieties = list(_VARIETIES.get(iso, ()))
+    explicit_locales = {entry[0] for entry in varieties}
+    for locale, region in options:
+        if locale in explicit_locales:
+            continue
+        if len(options) == 1:
+            label = name
+        else:
+            label = f'{region}{name}'
+            if sum(option_region == region for _, option_region in options) > 1:
+                label += f'（{locale}）'
+        varieties.append((locale, label, None, ''))
     for locale, label, iso_override, variety_aliases in varieties:
         variety_iso = iso_override or iso
         variety_aliases = list(filter(None, variety_aliases.split('|')))

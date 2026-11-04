@@ -22,7 +22,7 @@ const languageChoices = [
   {code:'zh_cn', name:'普通话', iso:'cmn', english:'Mandarin Chinese', aliases:['中文']},
   {code:'zh_tw', name:'台湾普通话', iso:'cmn', english:'Taiwanese Mandarin', aliases:['中文']},
   {code:'ar_eg', name:'埃及阿拉伯语', iso:'arz', english:'Egyptian Arabic', aliases:['阿拉伯语']},
-  {code:'ar_sa', name:'标准阿拉伯语', iso:'arb', english:'Standard Arabic', aliases:['阿拉伯语']},
+  {code:'ar_msa', name:'标准阿拉伯语', iso:'arb', english:'Standard Arabic', aliases:['阿拉伯语']},
   {code:'en_us', name:'美式英语', iso:'eng', english:'American English'},
   {code:'ceb_ph', name:'宿务语', iso:'ceb', english:'Cebuano'},
 ];
@@ -38,9 +38,10 @@ const choices = () => options.querySelectorAll('[role=option]');
 input.dispatchEvent({type:'focus'});
 assert.equal(choices().length, 6, 'focus displays every language even with a default value');
 assert.equal(options.children.length, choices().length, 'languages are shown directly without region groups');
-assert.equal(choices()[0].children[0].textContent, '普通话');
-assert.equal(choices()[2].children[0].textContent, '埃及阿拉伯语');
-assert.equal(choices()[2].children[1].textContent, 'ar_eg');
+assert.equal(choices()[0].children[0].textContent, 'zh_cn');
+assert.equal(choices()[0].children[1].textContent, '普通话');
+assert.equal(choices()[2].children[0].textContent, 'ar_eg');
+assert.equal(choices()[2].children[1].textContent, '埃及阿拉伯语');
 assert.equal(input.value, 'zh_cn');
 assert.equal(input.selected, true);
 input.value = 'en-US';
@@ -59,11 +60,11 @@ input.dispatchEvent({type:'keydown', key:'Enter', preventDefault() {}});
 assert.equal(input.value, 'zh_tw');
 input.value = '阿拉伯';
 input.dispatchEvent({type:'input'});
-assert.deepEqual(choices().map(choice => choice.children[0].textContent), ['埃及阿拉伯语', '标准阿拉伯语']);
+assert.deepEqual(choices().map(choice => choice.children[1].textContent), ['埃及阿拉伯语', '标准阿拉伯语']);
 input.value = 'Egyptian';
 input.dispatchEvent({type:'input'});
 assert.equal(choices().length, 1, 'English names remain searchable');
-assert.equal(choices()[0].children[0].textContent, '埃及阿拉伯语');
+assert.equal(choices()[0].children[1].textContent, '埃及阿拉伯语');
 input.value = '宿务';
 input.dispatchEvent({type:'input'});
 assert.equal(choices().length, 1);
