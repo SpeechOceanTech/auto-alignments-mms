@@ -237,17 +237,23 @@ async function showReview(job) {
 $('#close-review').onclick = closeReview;
 // The batch is registered before files are uploaded individually, so the upload
 // does not buffer several large recordings in the browser or in the server.
-let uploadMode = 'single', batchListVersion = 0, batchList = [], pendingBatch = null;
-function setUploadMode(mode) {
-  uploadMode = mode; const batch = mode === 'batch';
-  $('#single-inputs').hidden = batch; $('#batch-inputs').hidden = !batch;
-  $('#audio').required = !batch; $('#batch-audio').required = batch; $('#batch-text').required = batch;
-  for (const name of ['single', 'batch']) { const button = $(`#mode-${name}`); button.classList.toggle('active', name === mode); button.setAttribute('aria-pressed', String(name === mode)); }
-  $('#submit').textContent = batch ? '检查并提交批次' : '提交任务'; $('#batch-retry-actions').hidden = !batch || !pendingBatch; $('#submit-message').textContent = batch && pendingBatch ? '上次批次有文件上传失败，请重试或放弃后再提交新批次。' : '';
+let batchListVersion = 0, batchList = [], pendingBatch = null;
+const audioExtensions = new Set(['wav', 'mp3', 'flac', 'm4a', 'ogg', 'opus', 'aac', 'webm']);
+const batchFilesHint = '在同一目录中全选音频和 UTF-8 文本；按相同文件名配对，例如 sample.wav 和 sample.txt，每行一句。';
+function splitBatchFiles(files) {
+  const audio = [], text = [], other = [];
+  for (const file of files) {
+    const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+    if (audioExtensions.has(ext)) audio.push(file);
+    else if (ext === 'txt') text.push(file);
+    else other.push(file);
+  }
+  return {audio, text, other};
 }
-$('#mode-single').onclick = () => setUploadMode('single'); $('#mode-batch').onclick = () => setUploadMode('batch');
-$('#batch-audio').onchange = () => { $('#batch-audio-count').textContent = `已选择 ${$('#batch-audio').files.length} 个音频文件`; };
-$('#batch-text').onchange = () => { $('#batch-text-count').textContent = `已选择 ${$('#batch-text').files.length} 个文本文件；按相同文件名配对。`; };
+$('#batch-files').onchange = () => {
+  const {audio, text, other} = splitBatchFiles($('#batch-files').files);
+  $('#batch-files-count').textContent = `已选择 ${audio.length} 个音频、${text.length} 个文本${other.length ? `，${other.length} 个其他文件将被忽略` : ''}；按相同文件名配对。`;
+};
 function uploadDialog(title, message, details, noticeOnly = false) {
   const dialog = $('#upload-dialog'); dialog.returnValue = ''; $('#upload-dialog-cancel').hidden = noticeOnly; $('#upload-dialog-continue').textContent = noticeOnly ? '知道了' : '继续提交'; $('#upload-dialog-title').textContent = title; $('#upload-dialog-message').textContent = message; $('#upload-dialog-details').textContent = details;
   return new Promise(resolve => { dialog.addEventListener('close', () => resolve(dialog.returnValue === 'continue'), {once:true}); dialog.showModal(); });
@@ -258,14 +264,6 @@ function describePairing(result) {
   if (result.unmatched_text?.length) lines.push('缺少同名音频的文本：', ...result.unmatched_text.map(name => `  ${name}`), '');
   for (const duplicate of result.duplicates || []) lines.push(`文件名重复，无法唯一配对：${duplicate.stem}`, ...(duplicate.audio || []).map(name => `  音频：${name}`), ...(duplicate.text || []).map(name => `  文本：${name}`), '');
   return lines.join('\n').trim();
-}
-async function checkLanguages(language, texts) {
-  const warnings = [];
-  for (const item of texts) {
-    const result = await request('/v1/language-check', json({language, text:item.text}));
-    if (result.status === 'mismatch') warnings.push(`${item.name ? `${item.name}：` : ''}${result.message}`);
-  }
-  return !warnings.length || await uploadDialog('语种可能不一致', '以下文本与所选语种可能不一致，请确认后再提交。', warnings.join('\n'));
 }
 async function readTextFile(file) { try { return new TextDecoder('utf-8', {fatal:true}).decode(await file.arrayBuffer()); } catch (_) { throw new Error(`文本文件 ${file.name} 无法读取或不是 UTF-8 编码`); } }
 function sendJob(body, index = 0, count = 1) {
@@ -299,23 +297,15 @@ $('#download-batch').onclick = () => {
 };
 $('#refresh').addEventListener('click', () => loadBatches());
 $('#submit-form').addEventListener('submit', async event => {
-  event.preventDefault(); const form = event.currentTarget, language = $('#language').value.trim(), batch = uploadMode === 'batch';
-  const audioFiles = [...$('#batch-audio').files], textFiles = [...$('#batch-text').files], textFile = $('#text-file').files[0], text = $('#text').value.trim();
+  event.preventDefault(); const form = event.currentTarget, language = $('#language').value.trim();
+  const {audio:audioFiles, text:textFiles, other:otherFiles} = splitBatchFiles($('#batch-files').files);
   if (!language) { $('#submit-message').textContent = '请选择或输入语种'; return; }
-  if (batch && pendingBatch) { $('#submit-message').textContent = '上次批次有文件上传失败，请重试或放弃后再提交新批次。'; return; }
-  if (!batch && ((!textFile && !text) || (textFile && text))) { $('#submit-message').textContent = textFile ? '请只使用一种文本输入方式' : '请输入文本或选择文本文件'; return; }
-  const singleBody = batch ? null : new FormData(form);
-  $('#submit').disabled = true; $('#mode-single').disabled = true; $('#mode-batch').disabled = true; for (const id of ['language','audio','text-file','text','batch-audio','batch-text']) $(`#${id}`).disabled = true; $('#submit-message').textContent = '正在检查…';
+  if (pendingBatch) { $('#submit-message').textContent = '上次批次有文件上传失败，请重试或放弃后再提交新批次。'; return; }
+  if (!audioFiles.length && !textFiles.length && !otherFiles.length) { $('#submit-message').textContent = '请选择音频和文本文件'; return; }
+  $('#submit').disabled = true; for (const id of ['language','batch-files']) $(`#${id}`).disabled = true; $('#submit-message').textContent = '正在检查…';
   try {
-    if (!batch) {
-      const content = textFile ? await readTextFile(textFile) : text;
-      if (!await checkLanguages(language, [{name:textFile?.name || '', text:content}])) { $('#submit-message').textContent = '已取消提交'; return; }
-      const body = singleBody; if (!textFile) body.delete('text_file');
-      $('#upload-progress').hidden = false; $('#upload-progress-bar').style.width = '0%'; $('#upload-progress-text').textContent = '正在上传…';
-      const data = await sendJob(body); $('#submit-message').textContent = `已提交：${data.job_id}`; form.reset(); state.offset = 0; refresh(); return;
-    }
     const names = {audio_names:audioFiles.map(file => file.name), text_names:textFiles.map(file => file.name)};
-    const checked = await request('/v1/batches/check', json(names)); const details = describePairing(checked), initialCount = checked.pairs.length;
+    const checked = await request('/v1/batches/check', json(names)); const pairingDetails = describePairing(checked), details = [pairingDetails, otherFiles.length ? `不支持的文件，不会上传：\n${otherFiles.map(file => `  ${file.name}`).join('\n')}` : ''].filter(Boolean).join('\n\n'), initialCount = checked.pairs.length;
     if (!initialCount) { if (details) await uploadDialog('没有可配对的文件', '请检查文件名后重新选择。', details, true); $('#submit-message').textContent = '没有可配对的文件'; return; }
     if (details && !await uploadDialog('部分文件未能配对', `将检查并提交 ${initialCount} 组匹配文件；以下文件不会上传。`, details)) { $('#submit-message').textContent = '已取消提交'; return; }
     const audioByName = new Map(audioFiles.map(file => [file.name, file])), textByName = new Map(textFiles.map(file => [file.name, file]));
@@ -347,15 +337,15 @@ $('#submit-form').addEventListener('submit', async event => {
     await loadBatches(created.batch_id); state.offset = 0; state.selected.clear(); await refresh();
     $('#submit-message').textContent = `批次已提交 ${count - errors.length} / ${count} 组${errors.length ? `，${errors.length} 组上传失败` : ''}。`;
     if (errors.length) { pendingBatch = {id:created.batch_id, ownerId:state.user?.id, language, items:failedPairs}; $('#batch-retry-actions').hidden = false; await uploadDialog('部分文件上传失败', '已提交的任务会继续处理；可使用“重试失败上传”继续提交至同一批次。', errors.join('\n'), true); }
-    else { form.reset(); $('#batch-audio-count').textContent = '尚未选择音频文件'; $('#batch-text-count').textContent = '音频与文本按相同文件名配对，例如 sample.wav 和 sample.txt。'; }
+    else { form.reset(); $('#batch-files-count').textContent = batchFilesHint; }
   } catch (error) { $('#submit-message').textContent = error.message || '提交失败，请检查网络'; }
-  finally { $('#submit').disabled = false; $('#mode-single').disabled = false; $('#mode-batch').disabled = false; for (const id of ['language','audio','text-file','text','batch-audio','batch-text']) $(`#${id}`).disabled = false; $('#upload-progress').hidden = true; }
+  finally { $('#submit').disabled = false; for (const id of ['language','batch-files']) $(`#${id}`).disabled = false; $('#upload-progress').hidden = true; }
 });
 $('#batch-dismiss').onclick = () => { pendingBatch = null; $('#batch-retry-actions').hidden = true; $('#submit-message').textContent = '已放弃重试；已提交的任务仍会继续处理。'; };
 $('#batch-retry').onclick = async () => {
   if (!pendingBatch) return;
   if (pendingBatch.ownerId !== state.user?.id) { pendingBatch = null; $('#batch-retry-actions').hidden = true; $('#submit-message').textContent = '用户已切换，请重新选择文件。'; return; }
-  const current = pendingBatch, failed = [], errors = []; $('#batch-retry').disabled = true; $('#batch-dismiss').disabled = true; $('#submit').disabled = true; $('#mode-single').disabled = true; $('#mode-batch').disabled = true; $('#upload-progress').hidden = false;
+  const current = pendingBatch, failed = [], errors = []; $('#batch-retry').disabled = true; $('#batch-dismiss').disabled = true; $('#submit').disabled = true; $('#language').disabled = true; $('#batch-files').disabled = true; $('#upload-progress').hidden = false;
   try {
     for (let i = 0; i < current.items.length; i++) {
       const item = current.items[i], body = new FormData(); body.append('language', current.language); body.append('batch_id', current.id); body.append('audio', item.audio); body.append('text_file', item.text);
@@ -363,7 +353,7 @@ $('#batch-retry').onclick = async () => {
     }
     current.items = failed; await loadBatches(current.id); state.offset = 0; await refresh();
     if (failed.length) { $('#submit-message').textContent = `仍有 ${failed.length} 组上传失败，可继续重试。`; await uploadDialog('部分文件上传失败', '可继续重试，已提交的任务会继续处理。', errors.join('\n'), true); }
-    else { pendingBatch = null; $('#batch-retry-actions').hidden = true; $('#submit-message').textContent = '失败的文件已全部提交。'; $('#batch-audio').value = ''; $('#batch-text').value = ''; $('#batch-audio-count').textContent = '尚未选择音频文件'; $('#batch-text-count').textContent = '音频与文本按相同文件名配对，例如 sample.wav 和 sample.txt。'; }
-  } finally { $('#batch-retry').disabled = false; $('#batch-dismiss').disabled = false; $('#submit').disabled = false; $('#mode-single').disabled = false; $('#mode-batch').disabled = false; $('#upload-progress').hidden = true; }
+    else { pendingBatch = null; $('#batch-retry-actions').hidden = true; $('#submit-message').textContent = '失败的文件已全部提交。'; $('#batch-files').value = ''; $('#batch-files-count').textContent = batchFilesHint; }
+  } finally { $('#batch-retry').disabled = false; $('#batch-dismiss').disabled = false; $('#submit').disabled = false; $('#language').disabled = false; $('#batch-files').disabled = false; $('#upload-progress').hidden = true; }
 };
 health(); checkSession().then(() => loadBatches()); setInterval(() => { health(); refresh(); }, 5000); setInterval(() => loadBatches(), 15000);
