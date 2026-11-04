@@ -47,12 +47,12 @@ function switchTab(tab) {
 $('#tab-details').onclick = () => switchTab('details'); $('#tab-statistics').onclick = () => switchTab('statistics'); $('#tab-api-keys').onclick = () => switchTab('keys'); $('#tab-accounts').onclick = () => switchTab('accounts');
 const statsNumber = number => Number(number || 0).toLocaleString('zh-CN');
 const statsHours = seconds => (Number(seconds || 0) / 3600).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-function renderStatsTable(target, rows, kind, completed) {
+function renderStatsTable(target, rows, kind, totalSeconds) {
   if (!rows.length) { target.replaceChildren(node('p', '暂无已完成任务', 'stats-empty')); return; }
   const table = node('table'), thead = node('thead'), head = node('tr'), tbody = node('tbody');
-  for (const label of [kind === 'language' ? '语种' : '用户', '完成任务', '音频时长', '句数', '占比']) head.append(node('th', label));
+  for (const label of [kind === 'language' ? '语种' : '用户', '完成任务', '音频时长', '句数', '时长占比']) head.append(node('th', label));
   thead.append(head);
-  const denominator = Math.max(Number(completed) || 0, 1);
+  const denominator = Number(totalSeconds) || 0;
   for (const item of rows) {
     const row = node('tr');
     const code = kind === 'language' ? item.language : (item.username || '历史任务（无用户）');
@@ -61,7 +61,8 @@ function renderStatsTable(target, rows, kind, completed) {
     const duration = Number(item.audio_duration_sample_count || 0) ? `${statsHours(item.audio_seconds)} 小时${Number(item.audio_duration_sample_count) < Number(item.jobs) ? ' *' : ''}` : '—';
     const sentences = Number(item.sentence_sample_count || 0) ? `${statsNumber(item.sentence_count)}${Number(item.sentence_sample_count) < Number(item.jobs) ? ' *' : ''}` : '—';
     const metric = node('td'), bar = node('div', undefined, 'stats-bar'), fill = node('div', undefined, 'stats-bar-fill');
-    const percent = Math.max(0, Math.min(100, Number(item.jobs || 0) / denominator * 100)); fill.style.width = `${percent}%`; bar.append(fill); metric.append(bar, node('span', `${percent.toFixed(1)}%`, 'stats-percent'));
+    const known = Number(item.audio_duration_sample_count || 0) > 0 && denominator > 0;
+    const percent = known ? Math.max(0, Math.min(100, Number(item.audio_seconds || 0) / denominator * 100)) : 0; fill.style.width = `${percent}%`; bar.append(fill); metric.append(bar, node('span', known ? `${percent.toFixed(1)}%` : '—', 'stats-percent'));
     row.append(name, node('td', statsNumber(item.jobs)), node('td', duration), node('td', sentences), metric); tbody.append(row);
   }
   table.append(thead, tbody); target.replaceChildren(table);
@@ -74,10 +75,10 @@ async function loadStatistics() {
     const data = await request('/api/admin/usage'); if (!state.user?.is_admin || state.user.id !== userId) return;
     const total = data.totals, completed = Number(total.completed || 0);
     const metrics = [
-      ['累计完成任务', statsNumber(completed), '个'],
-      ['累计音频时长', Number(total.audio_duration_sample_count || 0) ? statsHours(total.audio_seconds) : '—', '小时'],
+      ['已完成任务', statsNumber(completed), '个'],
+      ['音频总时长', Number(total.audio_duration_sample_count || 0) ? statsHours(total.audio_seconds) : '—', '小时'],
       ['覆盖语种', statsNumber(total.language_count), '种'],
-      ['累计对齐句数', Number(total.sentence_sample_count || 0) ? statsNumber(total.sentence_count) : '—', '句'],
+      ['对齐句数', Number(total.sentence_sample_count || 0) ? statsNumber(total.sentence_count) : '—', '句'],
     ];
     $('#stats-summary').replaceChildren(...metrics.map(([label, value, unit]) => { const card = node('div', undefined, 'stats-metric'); const number = node('div', undefined, 'stats-metric-value'); number.append(document.createTextNode(value), node('span', unit)); card.append(node('div', label, 'stats-metric-label'), number); return card; }));
     const missingDuration = Math.max(0, completed - Number(total.audio_duration_sample_count || 0));
@@ -85,7 +86,7 @@ async function loadStatistics() {
     $('#stats-coverage').textContent = missingDuration || missingSentences ? `部分任务数据尚未取得：${statsNumber(missingDuration)} 个任务缺少音频时长，${statsNumber(missingSentences)} 个任务缺少句数；相应合计仅包含已有数据；分布中 * 表示该项数据不完整。` : '音频时长和句数已覆盖所有已完成任务。';
     const statuses = [['queued', '排队中'], ['running', '对齐中'], ['completed', '已完成'], ['failed', '失败']];
     $('#stats-status').replaceChildren(...statuses.map(([key, label]) => { const item = node('div', undefined, 'stats-status-item'); item.append(node('span', label, `stats-status-label ${key}`), node('strong', statsNumber(data.current[key]))); return item; }));
-    renderStatsTable($('#stats-languages'), data.languages || [], 'language', completed); renderStatsTable($('#stats-users'), data.users || [], 'user', completed); $('#stats-message').textContent = '';
+    renderStatsTable($('#stats-languages'), data.languages || [], 'language', total.audio_seconds); renderStatsTable($('#stats-users'), data.users || [], 'user', total.audio_seconds); $('#stats-message').textContent = '';
   } catch (error) { if (state.user?.is_admin && state.user.id === userId) $('#stats-message').textContent = `加载统计失败：${error.message}`; }
 }
 $('#refresh-statistics').onclick = loadStatistics;

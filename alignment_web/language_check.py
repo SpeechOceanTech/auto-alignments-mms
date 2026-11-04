@@ -7,6 +7,7 @@ from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 import re
+import math
 from threading import Lock
 import unicodedata
 
@@ -15,6 +16,7 @@ from pydantic import BaseModel
 
 from alignment_languages import COMMON_LANGUAGES, canonical_locale, normalize_language
 from .auth import require_account
+from . import fasttext_client
 from vendor.langdetect import DetectorFactory, LangDetectException
 
 router = APIRouter()
@@ -73,6 +75,7 @@ _RELATED = [
 ]
 _DETECT_ALIASES = {'no': 'nb_no', 'zh-cn': 'zh_cn', 'zh-tw': 'zh_tw', 'tl': 'tl_ph'}
 _NAMES = {item['iso']: item['language_name'] for item in COMMON_LANGUAGES}
+_KNOWN_ISOS = set(_NAMES)
 # Malay has no separate model profile. Common function words are used only to
 # suppress an English warning, never to positively identify a language.
 _MALAY_MARKERS = set('''yang dan untuk dengan tidak dalam kepada daripada kerana
@@ -145,6 +148,64 @@ def _identify(cleaned, counts, letter_count):
         return None
 
 
+def _fast_identify(cleaned, counts, letter_count):
+    """Identify three transcript sections, or signal that the backend is absent.
+
+    A successful but ambiguous prediction must remain uncertain; falling back
+    to another detector in that case could conceal mixed-language input.
+    """
+    if letter_count < 120 or (counts['LATIN'] / letter_count > .5 and
+                               len(re.findall(r'[^\W\d_]+', cleaned, re.UNICODE)) < 24):
+        return None
+    third = len(cleaned) // 3
+    width = min(third, 4000)
+    pieces = (cleaned[:width], cleaned[third:third + width], cleaned[-width:])
+    if any(sum(1 for char in piece if _script(char)) < 30 for piece in pieces):
+        return None
+    response = fasttext_client.predict(pieces)
+    if response is None:
+        return None
+    supported = set()
+    for code in response['labels']:
+        try:
+            iso = normalize_language(_DETECT_ALIASES.get(code, code))
+            if iso in _KNOWN_ISOS:
+                supported.add(iso)
+        except (ValueError, TypeError):
+            continue
+    observed = None
+    malay_or_indonesian = False
+    try:
+        predictions = response['predictions']
+        if len(predictions) == 3:
+            normalized = []
+            for code, confidence in predictions:
+                confidence = float(confidence)
+                if not math.isfinite(confidence) or not 0 <= confidence <= 1.0:
+                    break
+                locale = canonical_locale(_DETECT_ALIASES.get(code, code))
+                iso = normalize_language(locale)
+                if iso not in _KNOWN_ISOS or iso not in supported:
+                    break
+                normalized.append((locale, iso, confidence))
+            if len(normalized) == 3:
+                isos = {item[1] for item in normalized}
+                if len(isos) == 1 and all(item[2] >= .85 for item in normalized):
+                    observed = normalized[0][:2]
+                    malay_or_indonesian = isos <= {'ind', 'zsm'}
+                elif (isos <= {'ind', 'zsm'} and all(item[2] >= .55 for item in normalized)
+                      and letter_count >= 200 and counts['LATIN'] / letter_count >= .9
+                      and len(re.findall(r'[^\W\d_]+', cleaned, re.UNICODE)) >= 50):
+                    # A compressed model often confuses these close languages.
+                    # Require independent corroboration and identify the pair,
+                    # never an individual language from low scores alone.
+                    fallback = _identify(cleaned, counts, letter_count)
+                    malay_or_indonesian = bool(fallback and fallback[1] == 'ind')
+    except (TypeError, ValueError, KeyError):
+        pass
+    return supported, observed, malay_or_indonesian
+
+
 def _clearly_english_for_malay(cleaned, counts):
     # The Indonesian profile is a close but imperfect proxy for Malay. Only an
     # especially strong, consistent English prediction can justify a warning.
@@ -188,42 +249,68 @@ def check_language(language, text):
     if iso in {'cmn', 'yue', 'nan', 'jpn', 'kor'} and counts['HAN'] / len(letters) >= 0.9:
         result['message'] = '仅凭汉字无法可靠区分中文方言或日文汉字。'
         return result
+    fast = _fast_identify(cleaned, counts, len(letters))
     if scripts and sum(counts[s] for s in scripts) / len(letters) < 0.1:
         dominant, amount = counts.most_common(1)[0]
         if amount / len(letters) >= 0.8 and dominant != 'OTHER':
             label = _SCRIPT_LABELS.get(dominant, dominant.lower())
-            observed = _identify(cleaned, counts, len(letters))
-            if observed:
+            observed = fast[1] if fast is not None else _identify(cleaned, counts, len(letters))
+            if fast is not None and fast[2]:
+                name = '马来语或印度尼西亚语'
+                result.update(status='mismatch', detected_name=name,
+                              message=f'选择的是{_NAMES.get(iso, selected)}，文本主要使用{label}，与所选语种不符；疑似为{name}，请核对。')
+            elif observed:
                 observed_code, observed_iso = observed
-                name = _NAMES.get(observed_iso, observed_code)
+                # langdetect has no Malay profile and often labels Malay as
+                # Indonesian. Do not present that guess as a specific language.
+                ambiguous_malay = fast is None and observed_iso == 'ind'
+                name = '马来语或印度尼西亚语' if ambiguous_malay else _NAMES.get(observed_iso, observed_code)
+                if ambiguous_malay:
+                    observed_code = None
                 result.update(status='mismatch', detected_language=observed_code, detected_name=name,
-                              message=f'选择的是{_NAMES.get(iso, selected)}，文本疑似为{name}（主要使用{label}），请核对语种。')
+                              message=f'选择的是{_NAMES.get(iso, selected)}，文本主要使用{label}，与所选语种不符；疑似为{name}，请核对。')
             else:
                 result.update(status='mismatch', detected_name=label,
-                              message=f'选择的是{_NAMES.get(iso, selected)}，文本主要使用{label}，请核对语种。')
+                              message=f'选择的是{_NAMES.get(iso, selected)}，文本主要使用{label}，与所选语种不符，请核对。')
             return result
     # Profiles cover 55 languages; never infer a mismatch when the selected
     # language is unsupported, because it can be mistaken for a supported one.
-    model_codes = {item.replace('-', '_') for item in _model().langlist}
-    supported = False
-    for code in model_codes:
-        try:
-            model_iso = normalize_language(_DETECT_ALIASES.get(code.replace('_', '-'), code))
-            supported |= model_iso == iso
-        except ValueError:
-            pass
-    # Malay is covered conservatively using the closely related Indonesian
-    # profile; it is not equivalent to a full Malay language model.
-    supported |= iso == 'zsm' and 'id' in model_codes
+    if fast is not None:
+        supported = iso in fast[0]
+    else:
+        model_codes = {item.replace('-', '_') for item in _model().langlist}
+        supported = False
+        for code in model_codes:
+            try:
+                model_iso = normalize_language(_DETECT_ALIASES.get(code.replace('_', '-'), code))
+                supported |= model_iso == iso
+            except ValueError:
+                pass
+        # Malay has no langdetect profile; the proxy is used conservatively.
+        supported |= iso == 'zsm' and 'id' in model_codes
     if not supported or iso in {'yue', 'nan'}:
         result['message'] = '当前语种或文本特征无法可靠识别，请自行核对。'
         return result
+    if fast is not None and fast[2] and (fast[1] is None or iso not in {'ind', 'zsm'}):
+        if iso not in {'ind', 'zsm'}:
+            result.update(status='mismatch', detected_name='马来语或印度尼西亚语',
+                          message=f'选择的是{_NAMES.get(iso, selected)}，文本疑似为马来语或印度尼西亚语，请核对语种。')
+        else:
+            result['message'] = '文本可能是马来语或印度尼西亚语，无法可靠区分，请核对语种。'
+        return result
     # Two independent pieces must agree with high confidence.
-    observed = _identify(cleaned, counts, len(letters))
+    observed = fast[1] if fast is not None else _identify(cleaned, counts, len(letters))
     if observed is None:
         result['message'] = '文本语言特征不够一致，无法可靠判断语种。'
         return result
     observed, observed_iso = observed
+    if fast is None and observed_iso == 'ind':
+        if iso not in {'ind', 'zsm'}:
+            result.update(status='mismatch', detected_name='马来语或印度尼西亚语',
+                          message=f'选择的是{_NAMES.get(iso, selected)}，文本疑似为马来语或印度尼西亚语，请核对语种。')
+        else:
+            result['message'] = '文本可能是马来语或印度尼西亚语，无法可靠区分，请核对语种。'
+        return result
     # Do not claim a language match merely because a closely related language
     # was predicted; likewise, never warn about these common ambiguities.
     if iso == observed_iso:
@@ -231,7 +318,7 @@ def check_language(language, text):
                       message='文本与所选语种一致。')
     elif iso == 'zsm' and observed_iso == 'eng' and not _clearly_english_for_malay(cleaned, counts):
         return result
-    elif iso == 'zsm' and observed_iso != 'eng':
+    elif fast is None and iso == 'zsm' and observed_iso != 'eng':
         return result
     elif not _same_or_related(iso, observed_iso):
         result.update(status='mismatch', detected_language=observed, detected_name=_NAMES.get(observed_iso, observed),

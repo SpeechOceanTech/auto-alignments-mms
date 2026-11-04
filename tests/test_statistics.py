@@ -62,8 +62,46 @@ class StatisticsTests(unittest.TestCase):
             self.assertEqual(stats['totals']['audio_seconds'], 2)
             self.assertEqual(stats['totals']['sentence_count'], 3)
             self.assertTrue(store.delete('job'))
-            self.assertEqual(store.usage()['totals']['jobs'], 1)
+            self.assertEqual(store.usage()['totals']['jobs'], 0)
+            self.assertEqual(store.usage()['totals']['audio_seconds'], 0)
+            self.assertEqual(store.usage()['totals']['sentence_count'], 0)
             self.assertEqual(store.usage()['current']['completed'], 0)
+            with store.connect() as db:
+                self.assertEqual(db.execute('SELECT count(*) FROM completion_facts').fetchone()[0], 0)
+            store.fill_statistics('job', 8, 8)
+            self.assertEqual(store.usage()['totals']['jobs'], 0)
+
+    def test_current_jobs_and_distribution_order_by_duration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = JobStore(Path(directory) / 'db.sqlite3')
+            jobs = [
+                ('one', 'zh_cn', 'z', 10),
+                ('two', 'en_us', 'a', 20),
+                ('three', 'en_us', 'a', None),
+                ('four', 'de_de', 'c', 20),
+                ('five', 'fr_fr', 'b', None),
+                ('six', 'zh_cn', 'z', None),
+            ]
+            for job_id, language, owner, seconds in jobs:
+                store.create(job_id, language, 'a.wav', owner)
+                self.assertEqual(store.claim(), job_id)
+                store.finish(job_id, audio_seconds=seconds, sentence_count=1)
+            # A previous release preserved facts for deleted jobs. They must
+            # no longer inflate the current totals or distribution.
+            with store.connect() as db:
+                db.execute("INSERT INTO completion_facts VALUES ('orphan', 'ja_jp', 'd', CURRENT_TIMESTAMP, 1000, 1)")
+            usage = store.usage()
+            self.assertEqual(usage['totals']['jobs'], 6)
+            self.assertEqual(usage['totals']['audio_seconds'], 50)
+            self.assertEqual([item['language'] for item in usage['languages']],
+                             ['de_de', 'en_us', 'zh_cn', 'fr_fr'])
+            self.assertEqual([item['owner_id'] for item in usage['users']], ['a', 'c', 'z', 'b'])
+            self.assertTrue(store.delete('two'))
+            usage = store.usage()
+            self.assertEqual(usage['totals']['jobs'], 5)
+            self.assertEqual(usage['totals']['audio_seconds'], 30)
+            self.assertEqual([item['language'] for item in usage['languages']],
+                             ['de_de', 'zh_cn', 'en_us', 'fr_fr'])
 
     def test_legacy_backfill_and_admin_permissions(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -101,6 +139,6 @@ class StatisticsTests(unittest.TestCase):
                 self.assertEqual(stats['totals']['language_count'], 1)
                 self.assertEqual(stats['users'][0]['username'], '历史任务')
                 self.assertEqual(admin.delete('/v1/jobs/' + job_id, headers=headers).status_code, 200)
-                self.assertEqual(admin.get('/api/admin/usage').json()['totals']['jobs'], 1)
+                self.assertEqual(admin.get('/api/admin/usage').json()['totals']['jobs'], 0)
                 store.fill_statistics(job_id, 8, 8)
-                self.assertEqual(admin.get('/api/admin/usage').json()['totals']['audio_seconds'], 2)
+                self.assertEqual(admin.get('/api/admin/usage').json()['totals']['audio_seconds'], 0)

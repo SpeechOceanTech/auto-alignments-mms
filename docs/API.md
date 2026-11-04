@@ -50,7 +50,7 @@ Authorization: Bearer <API_KEY>
 
 文本使用 UTF-8（可带 BOM），每个非空行是一句；也支持 `ID<TAB>句子`。对齐时忽略 `【】` 内的标注，结果保留原文；这不是语音识别，文本应与录音内容和顺序一致。
 
-`POST /v1/language-check` 可在提交前检查语种，JSON 为 `{"language":"en_us","text":"..."}`，需要认证和非空语种。返回 `status`：`match`（文本特征与所选语种一致）、`mismatch`（疑似不一致）或 `uncertain`（无法可靠判断），以及 `selected_language`、`detected_language`、`detected_name`、`message`。这是本机离线辅助检查，短文本、相近语种、混合语言和模型未覆盖的语种可能无法判断。该接口不会创建任务；调用方可根据结果提示用户并决定是否继续提交。
+`POST /v1/language-check` 可在提交前检查语种，JSON 为 `{"language":"en_us","text":"..."}`，需要认证和非空语种。返回 `status`：`match`（文本特征与所选语种一致）、`mismatch`（疑似不一致）或 `uncertain`（无法可靠判断），以及 `selected_language`、`detected_language`、`detected_name`、`message`。这是本机离线辅助检查，短文本、相近语种、混合语言和模型未覆盖的语种可能无法判断。该接口不会创建任务；调用方可根据结果提示用户并决定是否继续提交。批量网页上传会在提交前调用此接口；直接调用任务提交 API 时，调用方需自行检查。
 
 ## 创建与查询任务
 
@@ -120,7 +120,7 @@ curl -H "Authorization: Bearer $ALIGN_API_KEY" "$BASE/v1/jobs/$JOB_ID"
 
 ### `DELETE /v1/jobs/{job_id}`
 
-仅管理员可删除已完成或失败的任务及其文件，成功返回 `{"deleted":"<job_id>"}`；排队中和运行中任务返回 `409`。管理员既可使用会话，也可使用其 API 密钥。已完成任务的累计统计保留。
+仅管理员可删除已完成或失败的任务及其文件，成功返回 `{"deleted":"<job_id>"}`；排队中和运行中任务返回 `409`。管理员既可使用会话，也可使用其 API 密钥。删除的任务不再计入统计。
 
 ## 结果、输入文件与波形
 
@@ -183,7 +183,7 @@ curl -G -o results.zip -H "Authorization: Bearer $ALIGN_API_KEY" \
 }
 ```
 
-`totals` 及分组统计累计完成的系统任务（包括网页和 API 提交），任务删除后仍保留完成记录；`current` 只反映尚在任务表中的实时状态，因此两者不必相等。语种覆盖数按模型 ISO 归并，语种分布保留地区代码。时长和句数仅统计已取得相应数据的样本，覆盖数分别为 `audio_duration_sample_count`、`sentence_sample_count`；本系统已有任务在启动后后台回填，缺失值不计入总和。旧流程的离线日志不计入统计。
+`totals` 及分组统计当前已完成的系统任务（包括网页和 API 提交），已删除任务不计入；`current` 按状态统计现有任务。语种和用户分布按已知音频总时长降序排列，时长未知的分组排在后面。语种覆盖数按模型 ISO 归并，语种分布保留地区代码。时长和句数仅统计已取得相应数据的样本，覆盖数分别为 `audio_duration_sample_count`、`sentence_sample_count`；本系统已有任务在启动后后台回填，缺失值不计入总和。旧流程的离线日志不计入统计。
 
 ## 错误和状态码
 

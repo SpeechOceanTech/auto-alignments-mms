@@ -178,15 +178,19 @@ class JobStore:
 
     def usage(self):
         metrics = """count(*) AS jobs,
-            coalesce(sum(audio_seconds), 0) AS audio_seconds,
-            count(audio_seconds) AS audio_duration_sample_count,
-            coalesce(sum(sentence_count), 0) AS sentence_count,
-            count(sentence_count) AS sentence_sample_count"""
+            coalesce(sum(f.audio_seconds), 0) AS audio_seconds,
+            count(f.audio_seconds) AS audio_duration_sample_count,
+            coalesce(sum(f.sentence_count), 0) AS sentence_count,
+            count(f.sentence_count) AS sentence_sample_count"""
+        # Old versions kept facts after deletion. Only count completed jobs
+        # still present, including when an orphaned fact predates this change.
+        source = " FROM completion_facts f JOIN jobs j ON j.id=f.job_id AND j.status='completed'"
+        duration_order = ' ORDER BY (count(f.audio_seconds) = 0), sum(f.audio_seconds) DESC, '
         with self.connect() as db:
             db.execute('BEGIN')
-            totals = dict(db.execute('SELECT ' + metrics + ' FROM completion_facts').fetchone())
-            languages = [dict(row) for row in db.execute('SELECT language, ' + metrics + ' FROM completion_facts GROUP BY language ORDER BY jobs DESC, language')]
-            users = [dict(row) for row in db.execute('SELECT owner_id, ' + metrics + ' FROM completion_facts GROUP BY owner_id ORDER BY jobs DESC, owner_id')]
+            totals = dict(db.execute('SELECT ' + metrics + source).fetchone())
+            languages = [dict(row) for row in db.execute('SELECT f.language, ' + metrics + source + ' GROUP BY f.language' + duration_order + 'f.language')]
+            users = [dict(row) for row in db.execute('SELECT f.owner_id, ' + metrics + source + ' GROUP BY f.owner_id' + duration_order + 'f.owner_id')]
             statuses = dict(db.execute('SELECT status, count(*) FROM jobs GROUP BY status').fetchall())
         totals['completed'] = totals['jobs']
         return {'totals': totals, 'languages': languages, 'users': users,
@@ -197,5 +201,6 @@ class JobStore:
             db.execute('BEGIN IMMEDIATE')
             cur = db.execute("DELETE FROM jobs WHERE id=? AND status IN ('completed', 'failed')", (job_id,))
             if cur.rowcount:
+                db.execute('DELETE FROM completion_facts WHERE job_id=?', (job_id,))
                 db.execute('UPDATE batch_items SET job_id=NULL WHERE job_id=?', (job_id,))
             return cur.rowcount == 1

@@ -24,8 +24,9 @@ assert(start >= 0 && end > start); vm.runInNewContext(source.slice(start,end),co
   const rows = $('#stats-languages').children[0].children[1].children;
   assert.equal(rows[0].children[0].textContent,'中文');
   assert.equal(rows[0].children[3].textContent,'45 *');
-  assert.equal(rows[0].children[4].children[1].textContent,'66.7%');
+  assert.equal(rows[0].children[4].children[1].textContent,'100.0%');
   assert.equal(rows[1].children[2].textContent,'—');
+  assert.equal(rows[1].children[4].children[1].textContent,'—');
   assert.equal($('#stats-users').children[0].textContent,'暂无已完成任务');
   state.user = {id:'ordinary',is_admin:false}; await context.loadStatistics(); assert.equal(calls,1);
   console.log('statistics UI tests passed');

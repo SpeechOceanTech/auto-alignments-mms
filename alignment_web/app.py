@@ -304,6 +304,8 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         # A running alignment may take hours; it will be marked interrupted on restart.
         app.state.worker.join(timeout=1)
         app.state.stats_worker.join(timeout=1)
+        from .fasttext_client import close as close_language_detector
+        close_language_detector()
 
     @app.get('/', response_class=HTMLResponse, include_in_schema=False)
     def index():
@@ -613,8 +615,6 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         job = get_job(job_id, user)
         if not user['is_admin']:
             raise HTTPException(403, '只有管理员可以删除任务')
-        if job['status'] == 'completed':
-            store.fill_statistics(job_id, *statistics_for(job))
         if not store.delete(job_id):
             raise HTTPException(409, '排队中或运行中的任务不能删除')
         shutil.rmtree(job_dir(job_id), ignore_errors=True)
