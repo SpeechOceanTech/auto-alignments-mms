@@ -18,7 +18,16 @@ class JobStore:
                 job_id TEXT PRIMARY KEY, language TEXT NOT NULL, owner_id TEXT,
                 completed_at TEXT NOT NULL, audio_seconds REAL, sentence_count INTEGER
             )""")
+            if 'batch_id' not in {row['name'] for row in db.execute('PRAGMA table_info(jobs)')}:
+                db.execute('ALTER TABLE jobs ADD COLUMN batch_id TEXT')
             db.execute('CREATE INDEX IF NOT EXISTS jobs_owner_id ON jobs(owner_id)')
+            db.execute('CREATE INDEX IF NOT EXISTS jobs_batch_id ON jobs(batch_id)')
+            db.execute('''CREATE TABLE IF NOT EXISTS batches (
+                id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, language TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)''')
+            db.execute('''CREATE TABLE IF NOT EXISTS batch_items (
+                batch_id TEXT NOT NULL, audio_name TEXT NOT NULL, text_name TEXT NOT NULL,
+                job_id TEXT, PRIMARY KEY(batch_id, audio_name, text_name))''')
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=30)
@@ -30,23 +39,71 @@ class JobStore:
             db.execute("UPDATE jobs SET status='failed', error=?, updated_at=CURRENT_TIMESTAMP WHERE status='running'",
                        ('服务重启，任务中断；请重新提交。',))
 
-    def create(self, job_id, language, audio_name, owner_id=None):
+    def create(self, job_id, language, audio_name, owner_id=None, batch_id=None, batch_audio=None, batch_text=None):
         with self.connect() as db:
-            db.execute("INSERT INTO jobs (id, language, audio_name, status, owner_id) VALUES (?, ?, ?, 'queued', ?)",
-                       (job_id, language, audio_name, owner_id))
+            if batch_id:
+                db.execute('BEGIN IMMEDIATE')
+                item = db.execute("SELECT job_id FROM batch_items WHERE batch_id=? AND audio_name=? AND text_name=?",
+                                  (batch_id, batch_audio, batch_text)).fetchone()
+                if item is None:
+                    raise ValueError('文件不属于这个批次')
+                if item['job_id']:
+                    return item['job_id']
+            db.execute("INSERT INTO jobs (id, language, audio_name, status, owner_id, batch_id) VALUES (?, ?, ?, 'queued', ?, ?)",
+                       (job_id, language, audio_name, owner_id, batch_id))
+            if batch_id:
+                db.execute('UPDATE batch_items SET job_id=? WHERE batch_id=? AND audio_name=? AND text_name=?',
+                           (job_id, batch_id, batch_audio, batch_text))
+            return job_id
+
+    def create_batch(self, batch_id, owner_id, language, pairs):
+        with self.connect() as db:
+            db.execute('INSERT INTO batches(id, owner_id, language) VALUES (?, ?, ?)', (batch_id, owner_id, language))
+            db.executemany('INSERT INTO batch_items(batch_id, audio_name, text_name) VALUES (?, ?, ?)',
+                           [(batch_id, pair['audio'], pair['text']) for pair in pairs])
+
+    def get_batch(self, batch_id):
+        with self.connect() as db:
+            row = db.execute('SELECT * FROM batches WHERE id=?', (batch_id,)).fetchone()
+            return dict(row) if row else None
+
+    def get_batch_item(self, batch_id, audio_name, text_name):
+        with self.connect() as db:
+            row = db.execute('SELECT job_id FROM batch_items WHERE batch_id=? AND audio_name=? AND text_name=?',
+                             (batch_id, audio_name, text_name)).fetchone()
+            return dict(row) if row else None
+
+    def list_batches(self, owner_id=None):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute("""SELECT b.*,
+                (SELECT count(*) FROM batch_items i WHERE i.batch_id=b.id) AS total,
+                (SELECT count(*) FROM batch_items i WHERE i.batch_id=b.id AND i.job_id IS NULL) AS unsubmitted,
+                (SELECT count(*) FROM jobs j WHERE j.batch_id=b.id AND j.status='queued') AS queued,
+                (SELECT count(*) FROM jobs j WHERE j.batch_id=b.id AND j.status='running') AS running,
+                (SELECT count(*) FROM jobs j WHERE j.batch_id=b.id AND j.status='completed') AS completed,
+                (SELECT count(*) FROM jobs j WHERE j.batch_id=b.id AND j.status='failed') AS failed
+                FROM batches b WHERE (? IS NULL OR b.owner_id=?) ORDER BY b.created_at DESC, b.rowid DESC""",
+                (owner_id, owner_id))]
+
+    def batch_jobs(self, batch_id):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute('SELECT * FROM jobs WHERE batch_id=? ORDER BY rowid', (batch_id,))]
 
     def get(self, job_id):
         with self.connect() as db:
             row = db.execute('SELECT * FROM jobs WHERE id=?', (job_id,)).fetchone()
             return dict(row) if row else None
 
-    def list(self, limit, offset, status=None, language=None, q=None, created_from=None, created_to=None, owner_id=None, legacy_language=None, legacy_owner=False):
+    def list(self, limit, offset, status=None, language=None, q=None, created_from=None, created_to=None, owner_id=None, legacy_language=None, legacy_owner=False, batch_id=None):
         conditions, values = [], []
         if legacy_owner:
             conditions.append('owner_id IS NULL')
         elif owner_id is not None:
             conditions.append('owner_id=?')
             values.append(owner_id)
+        if batch_id:
+            conditions.append('batch_id=?')
+            values.append(batch_id)
         if status:
             conditions.append('status=?')
             values.append(status)
@@ -137,5 +194,8 @@ class JobStore:
 
     def delete(self, job_id):
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
             cur = db.execute("DELETE FROM jobs WHERE id=? AND status IN ('completed', 'failed')", (job_id,))
+            if cur.rowcount:
+                db.execute('UPDATE batch_items SET job_id=NULL WHERE job_id=?', (job_id,))
             return cur.rowcount == 1

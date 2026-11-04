@@ -50,6 +50,8 @@ Authorization: Bearer <API_KEY>
 
 文本使用 UTF-8（可带 BOM），每个非空行是一句；也支持 `ID<TAB>句子`。对齐时忽略 `【】` 内的标注，结果保留原文；这不是语音识别，文本应与录音内容和顺序一致。
 
+`POST /v1/language-check` 可在提交前检查语种，JSON 为 `{"language":"en_us","text":"..."}`，需要认证和非空语种。返回 `status`：`match`（文本特征与所选语种一致）、`mismatch`（疑似不一致）或 `uncertain`（无法可靠判断），以及 `selected_language`、`detected_language`、`detected_name`、`message`。这是本机离线辅助检查，短文本、相近语种、混合语言和模型未覆盖的语种可能无法判断。该接口不会创建任务；调用方可根据结果提示用户并决定是否继续提交。
+
 ## 创建与查询任务
 
 ### `POST /v1/jobs`
@@ -62,6 +64,7 @@ Authorization: Bearer <API_KEY>
 | `language` | 是 | 例如 `zh_cn`、`en_us` 或支持的语种名称 |
 | `text` | 二选一 | 直接提交的逐句文本 |
 | `text_file` | 二选一 | UTF-8 文本文件；与非空 `text` 不能同时提交 |
+| `batch_id` | 否 | 批次 ID；批量提交时必填，且必须上传与清单匹配的 `text_file` |
 
 默认音频上限 2048 MiB，可通过服务配置修改；文本上限 2 MiB。音频在请求期间转换为 16 kHz 单声道 WAV，转换完成并进入队列后才返回 `202`；新任务只保留转换后的音频。任务执行是异步的，返回队列状态并不代表对齐完成。
 
@@ -89,8 +92,19 @@ curl -X POST "$BASE/v1/jobs" \
 | `q` | 音频文件名或任务 ID 的子串 |
 | `created_from`、`created_to` | `YYYY-MM-DD`，起止日期均包含当天；数据库任务时间使用 UTC |
 | `owner_id` | 仅管理员可指定；`__legacy__` 表示无主的旧网页任务 |
+| `batch_id` | 返回指定批次内的任务 |
 
 响应格式 `{"jobs":[...],"total":0,"limit":50,"offset":0}`。任务记录包括 `id`、`language`、`audio_name`、`status`、`created_at`、`updated_at`、`error`、`owner_id` 和 `artifacts`；管理员列表额外包含 `owner_username`。按创建时间倒序排列。
+
+### 批量上传和批次下载
+
+批量接口逐对上传音频和文本，每条音频继续适用单任务上传上限；语种必须明确提供。文件按去除扩展名的名称匹配，忽略大小写并进行 Unicode 规范化。音频只支持单任务列出的格式，文本文件须为 `.txt`。重复名称的组不会匹配；最多提交 1000 对文件。
+
+1. `POST /v1/batches/check` 发送 JSON 清单，例如 `{"audio_names":["a.wav","b.wav"],"text_names":["a.txt"],"language":"zh_cn"}`。返回 `pairs`（每项为 `{"audio":"a.wav","text":"a.txt"}`）、`unmatched_audio`、`unmatched_text` 和 `duplicates`。重复项包含 `stem`、`audio`、`text` 列表。检查不上传文件，也不创建任务。
+2. `POST /v1/batches` 发送相同清单及必填 `language`，返回相同的配对信息和 `batch_id`；至少须有一对匹配文件。未匹配和重复文件不进入该批次。
+3. 对每一对，调用 `POST /v1/jobs`，以 multipart 上传 `audio`、`text_file`、`language` 和 `batch_id`。文件名须与批次清单完全一致，语种须与批次一致。重复提交同一对返回已有任务 ID，避免重复排队。各对任务分别排队，已成功提交的任务不受其他对上传失败影响。
+4. `GET /v1/batches` 返回可见批次及 `total`、`unsubmitted`、`queued`、`running`、`completed`、`failed` 数量；管理员的批次记录还包括 `owner_username`。`GET /v1/jobs?batch_id=<id>` 查询批次内任务，支持现有分页。
+5. `GET /v1/batches/<id>/artifacts.zip?formats=csv` 下载该批次所有已完成任务的结果，支持 `csv`、`textgrid`、`txt` 及逗号组合；尚未完成或失败的任务不会包含在压缩包中，批次尚无已完成任务时返回 `409`。普通用户只能访问自己的批次，管理员可查看和下载所有批次。
 
 ### `GET /v1/jobs/{job_id}`
 

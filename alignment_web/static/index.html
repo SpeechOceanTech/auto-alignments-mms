@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>长音频文本对齐服务</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/style.css?v=20261103-stats">
+  <link rel="stylesheet" href="/static/style.css?v=20261104-batches">
 </head>
 <body>
   <header>
@@ -27,19 +27,26 @@
     <div id="task-detail-panel" class="task-detail-panel">
       <section class="controls">
         <h2>新建对齐任务</h2>
+        <div class="upload-mode" role="group" aria-label="上传方式"><button type="button" id="mode-single" class="active" aria-pressed="true">单个上传</button><button type="button" id="mode-batch" aria-pressed="false">批量上传</button></div>
         <form id="submit-form">
-          <div class="field"><label for="language">语种 / Language</label><div class="language-picker"><input id="language" name="language" value="zh_cn" required autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="language-options"><div id="language-options" class="language-options" role="listbox" hidden></div></div><small>输入语种名称、代码或别名搜索，也可直接输入代码</small></div>
-          <div class="field"><label for="audio">音频文件 / Audio</label><input id="audio" name="audio" type="file" accept=".wav,.mp3,.flac,.m4a,.ogg,.opus,.aac,.webm" required></div>
+          <div class="field"><label for="language">语种 / Language</label><div class="language-picker"><input id="language" name="language" required placeholder="请选择或输入语种" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="language-options"><div id="language-options" class="language-options" role="listbox" hidden></div></div><small>输入语种名称、代码或别名搜索，也可直接输入代码</small></div>
+          <div id="single-inputs"><div class="field"><label for="audio">音频文件 / Audio</label><input id="audio" name="audio" type="file" accept=".wav,.mp3,.flac,.m4a,.ogg,.opus,.aac,.webm" required></div>
           <div class="field"><label for="text-file">文本文件（UTF-8）</label><input name="text_file" id="text-file" type="file" accept=".txt,text/plain"><small>上传文件或在下方输入，二选一；每行一句。</small></div>
           <div class="field"><label for="text">逐句文本</label><textarea name="text" id="text" rows="7" placeholder="第一句文本&#10;第二句文本"></textarea></div>
+          </div>
+          <div id="batch-inputs" hidden>
+            <div class="field"><label for="batch-audio">音频文件（可多选）</label><input id="batch-audio" type="file" multiple accept=".wav,.mp3,.flac,.m4a,.ogg,.opus,.aac,.webm"><small id="batch-audio-count">尚未选择音频文件</small></div>
+            <div class="field"><label for="batch-text">文本文件（可多选，UTF-8）</label><input id="batch-text" type="file" multiple accept=".txt,text/plain"><small id="batch-text-count">音频与文本按相同文件名配对，例如 sample.wav 和 sample.txt。</small></div>
+          </div>
           <button type="submit" id="submit">提交任务</button>
           <div id="upload-progress" class="upload-progress" hidden><div class="upload-progress-track"><div id="upload-progress-bar"></div></div><small id="upload-progress-text"></small></div>
-          <p id="submit-message" class="message" role="status"></p>
+          <div id="batch-retry-actions" class="batch-retry-actions" hidden><button id="batch-retry" type="button" class="outline">重试失败上传</button><button id="batch-dismiss" type="button" class="outline">放弃重试</button></div><p id="submit-message" class="message" role="status"></p>
         </form>
       </section>
       <section class="jobs">
-        <div class="toolbar"><h2>任务 / Jobs</h2><div class="toolbar-actions"><span id="selection-count" class="selection-count"></span><details class="bulk-format-menu" id="bulk-format-menu"><summary id="bulk-format-summary">下载格式：CSV</summary><div class="bulk-format-options" role="group" aria-label="批量下载格式"><label><input type="checkbox" name="bulk-format" value="csv" checked> CSV</label><label><input type="checkbox" name="bulk-format" value="textgrid"> TextGrid</label><label><input type="checkbox" name="bulk-format" value="txt"> TXT</label></div></details><button id="delete-selected" class="outline danger" type="button" disabled>删除所选</button><button id="download-selected" class="outline" type="button" disabled>下载所选</button><button id="refresh" class="outline" type="button">刷新</button></div></div>
+        <div class="toolbar"><h2>任务 / Jobs</h2><div class="toolbar-actions"><span id="selection-count" class="selection-count"></span><details class="bulk-format-menu" id="bulk-format-menu"><summary id="bulk-format-summary">下载格式：CSV</summary><div class="bulk-format-options" role="group" aria-label="批量下载格式"><label><input type="checkbox" name="bulk-format" value="csv" checked> CSV</label><label><input type="checkbox" name="bulk-format" value="textgrid"> TextGrid</label><label><input type="checkbox" name="bulk-format" value="txt"> TXT</label></div></details><button id="delete-selected" class="outline danger" type="button" disabled>删除所选</button><button id="download-selected" class="outline" type="button" disabled>下载所选</button><button id="download-batch" class="outline" type="button" disabled>下载本批次</button><button id="refresh" class="outline" type="button">刷新</button></div></div>
         <div class="job-filters">
+          <div class="field"><label for="filter-batch">批次</label><select id="filter-batch"><option value="">全部批次</option></select></div>
           <div class="field"><label for="filter-language">语种</label><div class="language-picker"><input id="filter-language" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="filter-language-options" placeholder="全部语种"><div id="filter-language-options" class="language-options" role="listbox" hidden></div></div></div>
           <div class="field" id="filter-owner-field" hidden><label for="filter-owner">用户</label><select id="filter-owner"><option value="">全部用户</option><option value="__legacy__">历史任务（无用户）</option></select></div>
           <div class="field"><label for="filter-status">状态</label><select id="filter-status"><option value="">全部状态</option><option value="queued">排队中</option><option value="running">对齐中</option><option value="completed">已完成</option><option value="failed">失败</option></select></div>
@@ -106,8 +113,9 @@
     <section id="api-keys-panel" class="admin-panel" hidden><div class="toolbar"><h2>API 密钥</h2><button id="refresh-api-keys" class="outline" type="button">刷新</button></div><div class="api-key-content"><p>使用密钥在 API 请求中携带 <code>Authorization: Bearer &lt;密钥&gt;</code>。密钥只在创建时显示一次，请妥善保存。</p><form id="api-key-form" class="api-key-form"><div class="field"><label for="api-key-name">密钥名称</label><input id="api-key-name" maxlength="100" required placeholder="例如：我的脚本"></div><button id="api-key-create" type="submit">创建密钥</button></form><div id="new-api-key" class="new-api-key" hidden><strong>请立即复制密钥；关闭或离开此页面后将无法再次查看。</strong><div class="api-key-secret-row"><input id="api-key-secret" readonly aria-label="新创建的 API 密钥"><button id="copy-api-key" class="outline" type="button">复制</button><button id="close-api-key" class="outline" type="button">关闭</button></div></div><div id="api-key-list"></div><p id="api-key-message" class="message" role="status"></p></div></section>
     <section id="admin-accounts" class="admin-panel" hidden><div class="toolbar"><h2>账号管理</h2><button id="refresh-users" class="outline" type="button">刷新</button></div><p class="admin-description">管理已登录用户的状态和管理员权限。</p><div id="user-list"></div><p id="admin-message" class="message" role="status"></p></section>
   </main>
+  <dialog id="upload-dialog" class="upload-dialog" aria-labelledby="upload-dialog-title"><form method="dialog"><h2 id="upload-dialog-title"></h2><p id="upload-dialog-message"></p><pre id="upload-dialog-details"></pre><div class="upload-dialog-actions"><button id="upload-dialog-cancel" value="cancel" class="outline" type="submit">取消</button><button id="upload-dialog-continue" value="continue" type="submit">继续提交</button></div></form></dialog>
   <script src="/static/date-picker.js" defer></script>
   <script src="/static/waveform.js"></script>
-  <script src="/static/app.js?v=20261103-api-admin"></script>
+  <script src="/static/app.js?v=20261104-batches"></script>
 </body>
 </html>

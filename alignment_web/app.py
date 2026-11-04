@@ -10,12 +10,15 @@ import sys
 import tempfile
 import threading
 import uuid
+import unicodedata
 import wave
 import zipfile
 from datetime import date
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
+
+from pydantic import BaseModel, Field
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -28,6 +31,7 @@ from alignment_csv import audition_csv_bytes, read_alignment_csv
 
 from .store import JobStore
 from .statistics import audio_duration, output_sentences
+from .language_check import router as language_check_router
 from .auth import AuthStore, SmtpCodeSender, require_account, require_admin, router as auth_router
 
 LOG = logging.getLogger(__name__)
@@ -37,6 +41,41 @@ JOB_PATTERN = re.compile(r'^[0-9a-f]{32}$')
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.flac', '.m4a', '.ogg', '.opus', '.aac', '.webm'}
 FORMATS = {'csv': 'result.csv', 'textgrid': 'result.TextGrid', 'txt': 'result.txt'}
 STATIC_ROOT = Path(__file__).parent / 'static'
+
+
+class BatchManifest(BaseModel):
+    audio_names: list[str] = Field(default_factory=list)
+    text_names: list[str] = Field(default_factory=list)
+    language: str = ''
+
+
+def _batch_pairs(manifest):
+    if len(manifest.audio_names) + len(manifest.text_names) > 2000:
+        raise HTTPException(400, '一个批次最多包含 1000 对文件')
+    groups = {}
+    for names, kind in ((manifest.audio_names, 'audio'), (manifest.text_names, 'text')):
+        for name in names:
+            if not name or len(name) > 255 or '/' in name or '\\' in name or name in {'.', '..'} or any(ord(c) < 32 for c in name):
+                raise HTTPException(400, '文件名无效')
+            path = Path(name)
+            if (kind == 'audio' and path.suffix.lower() not in AUDIO_EXTENSIONS) or (kind == 'text' and path.suffix.lower() != '.txt'):
+                raise HTTPException(400, '批量上传仅支持音频文件和 .txt 文本文件')
+            key = unicodedata.normalize('NFC', path.stem).casefold()
+            if not key:
+                raise HTTPException(400, '文件名无效')
+            groups.setdefault(key, {'audio': [], 'text': []})[kind].append(name)
+    result = {'pairs': [], 'unmatched_audio': [], 'unmatched_text': [], 'duplicates': []}
+    for key, group in groups.items():
+        audios, texts = group['audio'], group['text']
+        if len(audios) > 1 or len(texts) > 1:
+            result['duplicates'].append({'stem': key, 'audio': audios, 'text': texts})
+        elif audios and texts:
+            result['pairs'].append({'audio': audios[0], 'text': texts[0]})
+        elif audios:
+            result['unmatched_audio'].extend(audios)
+        else:
+            result['unmatched_text'].extend(texts)
+    return result
 
 
 def _download_stem(audio_name):
@@ -166,6 +205,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
     app.state.auth_store = auth_store
     app.state.auth_secure_cookie = os.environ.get('ALIGN_AUTH_SECURE_COOKIE', '0') == '1'
     app.include_router(auth_router)
+    app.include_router(language_check_router)
 
     def job_dir(job_id):
         if not JOB_PATTERN.fullmatch(job_id):
@@ -188,6 +228,14 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         else:
             job['artifacts'] = []
         return job
+
+    def get_batch(batch_id, user):
+        if not JOB_PATTERN.fullmatch(batch_id):
+            raise HTTPException(404, '批次不存在')
+        batch = store.get_batch(batch_id)
+        if not batch or (not user['is_admin'] and batch['owner_id'] != user['id']):
+            raise HTTPException(404, '批次不存在')
+        return batch
 
     def statistics_for(job):
         try:
@@ -290,7 +338,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
     def list_jobs(limit: int = 50, offset: int = 0, status: Optional[str] = None,
                   language: Optional[str] = None, q: Optional[str] = None,
                   created_from: Optional[date] = None, created_to: Optional[date] = None,
-                  owner_id: Optional[str] = None,
+                  owner_id: Optional[str] = None, batch_id: Optional[str] = None,
                   user: dict = Depends(require_account)):
         limit, offset = max(1, min(limit, 200)), max(0, offset)
         if owner_id and not user['is_admin']:
@@ -299,6 +347,8 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
             raise HTTPException(400, '无效的任务状态')
         if created_from and created_to and created_from > created_to:
             raise HTTPException(400, '开始日期不能晚于结束日期')
+        if batch_id:
+            get_batch(batch_id, user)
         legacy_language = None
         if language:
             try:
@@ -311,7 +361,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
                                  str(created_to) if created_to else None,
                                  owner_id=(None if owner_id == '__legacy__' else owner_id) if user['is_admin'] else user['id'],
                                  legacy_language=legacy_language,
-                                 legacy_owner=owner_id == '__legacy__')
+                                 legacy_owner=owner_id == '__legacy__', batch_id=batch_id)
         jobs = [get_job(job['id'], user) for job in jobs]
         if user['is_admin']:
             owners = {job['owner_id'] for job in jobs if job['owner_id']}
@@ -321,14 +371,34 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
                 job['owner_username'] = usernames.get(owner, '未知用户') if owner else '历史任务'
         return {'jobs': jobs, 'total': total, 'limit': limit, 'offset': offset}
 
-    @app.get('/v1/jobs/bulk-artifacts.zip')
-    def bulk_artifacts(job_ids: str, formats: str = 'csv', user: dict = Depends(require_account)):
-        ids = list(dict.fromkeys(part.strip() for part in job_ids.split(',') if part.strip()))
-        selected = list(dict.fromkeys(part.strip().lower() for part in formats.split(',') if part.strip()))
-        if not ids or len(ids) > 200:
-            raise HTTPException(400, '请选择 1 至 200 个任务')
-        if not selected or any(kind not in FORMATS for kind in selected):
-            raise HTTPException(400, '请选择有效的结果格式')
+    @app.post('/v1/batches/check')
+    def check_batch(manifest: BatchManifest, user: dict = Depends(require_account)):
+        return _batch_pairs(manifest)
+
+    @app.post('/v1/batches', status_code=201)
+    def create_batch(manifest: BatchManifest, user: dict = Depends(require_account)):
+        try:
+            language = canonical_locale(manifest.language)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        result = _batch_pairs(manifest)
+        if not result['pairs']:
+            raise HTTPException(400, '没有可以上传的匹配文件')
+        batch_id = uuid.uuid4().hex
+        store.create_batch(batch_id, user['id'], language, result['pairs'])
+        return {'batch_id': batch_id, **result}
+
+    @app.get('/v1/batches')
+    def list_batches(user: dict = Depends(require_account)):
+        batches = store.list_batches(None if user['is_admin'] else user['id'])
+        if user['is_admin']:
+            owners = {batch['owner_id'] for batch in batches}
+            usernames = app.state.auth_store.usernames_for_ids(owners) if app.state.auth_store else {}
+            for batch in batches:
+                batch['owner_username'] = usernames.get(batch['owner_id'], '未知用户')
+        return {'batches': batches}
+
+    def download_jobs(ids, selected, user):
         files = []
         used_stems = set()
         for job_id in ids:
@@ -362,14 +432,50 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
                             headers={'Cache-Control': 'no-store'},
                             background=BackgroundTask(Path(temporary.name).unlink, missing_ok=True))
 
+    @app.get('/v1/jobs/bulk-artifacts.zip')
+    def bulk_artifacts(job_ids: str, formats: str = 'csv', user: dict = Depends(require_account)):
+        ids = list(dict.fromkeys(part.strip() for part in job_ids.split(',') if part.strip()))
+        selected = list(dict.fromkeys(part.strip().lower() for part in formats.split(',') if part.strip()))
+        if not ids or len(ids) > 200:
+            raise HTTPException(400, '请选择 1 至 200 个任务')
+        if not selected or any(kind not in FORMATS for kind in selected):
+            raise HTTPException(400, '请选择有效的结果格式')
+        return download_jobs(ids, selected, user)
+
+    @app.get('/v1/batches/{batch_id}/artifacts.zip')
+    def batch_artifacts(batch_id: str, formats: str = 'csv', user: dict = Depends(require_account)):
+        get_batch(batch_id, user)
+        selected = list(dict.fromkeys(part.strip().lower() for part in formats.split(',') if part.strip()))
+        if not selected or any(kind not in FORMATS for kind in selected):
+            raise HTTPException(400, '请选择有效的结果格式')
+        ids = [job['id'] for job in store.batch_jobs(batch_id) if job['status'] == 'completed']
+        if not ids:
+            raise HTTPException(409, '批次中没有已完成的任务')
+        return download_jobs(ids, selected, user)
+
     @app.post('/v1/jobs', status_code=202)
     async def create_job(audio: UploadFile = File(...), language: str = Form(...),
                          text: str = Form(''), text_file: Optional[UploadFile] = File(None),
+                         batch_id: Optional[str] = Form(None),
                          user: dict = Depends(require_account)):
         try:
             language = canonical_locale(language)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
+        if batch_id:
+            batch = get_batch(batch_id, user)
+            if batch['owner_id'] != user['id']:
+                raise HTTPException(403, '只能向自己的批次提交任务')
+            if batch['language'] != language or not text_file:
+                raise HTTPException(400, '批次语种不一致或未上传文本文件')
+            item = store.get_batch_item(batch_id, audio.filename, text_file.filename)
+            if item is None:
+                raise HTTPException(400, '文件不属于这个批次')
+            if item['job_id']:
+                existing = store.get(item['job_id'])
+                if existing:
+                    return {'job_id': existing['id'], 'status': existing['status']}
+                raise HTTPException(409, '任务状态已改变，请重试')
         suffix = Path(audio.filename or '').suffix.lower()
         if suffix not in AUDIO_EXTENSIONS:
             raise HTTPException(400, '不支持的音频文件类型')
@@ -410,7 +516,14 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
                 raise HTTPException(400, f'音频转换失败：{exc}') from exc
             original.unlink()
             (directory / 'input.txt').write_text(decoded, encoding='utf-8')
-            store.create(job_id, language, Path(audio.filename or 'audio').stem[:200] + suffix, user['id'])
+            try:
+                created_id = store.create(job_id, language, Path(audio.filename or 'audio').stem[:200] + suffix,
+                                          user['id'], batch_id, audio.filename, text_file.filename if text_file else None)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            if created_id != job_id:
+                shutil.rmtree(directory, ignore_errors=True)
+                job_id = created_id
         except BaseException:
             shutil.rmtree(directory, ignore_errors=True)
             raise
@@ -419,7 +532,10 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
             if text_file:
                 await text_file.close()
         wake.set()
-        return {'job_id': job_id, 'status': 'queued'}
+        current = store.get(job_id)
+        if current is None:
+            raise HTTPException(409, '任务状态已改变，请重试')
+        return {'job_id': job_id, 'status': current['status']}
 
     @app.get('/v1/jobs/{job_id}')
     def job_detail(job_id: str, user: dict = Depends(require_account)):

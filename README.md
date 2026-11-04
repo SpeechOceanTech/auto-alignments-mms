@@ -16,7 +16,7 @@ export MMS_MODEL_PATH=/data/duhu/alignments/align_model/model.pt
 # export MMS_DICTIONARY_PATH=/path/to/dictionary.txt
 ```
 
-默认使用可见的 CUDA 设备，否则使用 CPU。指定 GPU 时应使用物理设备编号，并注意 CUDA 会将可见设备重新编号。例如仅使用物理 GPU 4：
+默认使用可见的 CUDA 设备，否则使用 CPU。指定 GPU 时应使用物理设备编号，并注意 CUDA 会将可见设备重新编号。例如仅使用物理 GPU 0：
 
 ```bash
 export CUDA_VISIBLE_DEVICES=0
@@ -31,7 +31,9 @@ export ALIGN_DEVICE=cuda:0
 
 CSV 按原流程的 Adobe Audition 标记格式输出：UTF-8、制表符分隔，字段为 `Name`、`Start`、`Duration`、`Time Format`、`Type`、`Description`；时间采用 `时:分:秒.微秒`，文本保存在 `Description`。文本结果的 `start` 和 `end` 单位为秒，TextGrid 使用 `sentences` interval tier。处理流程与原脚本一致：转换为 16 kHz 单声道，使用 Silero VAD 检测语音，以 MMS 对齐文本，再根据静音区间修正句子边界。原脚本中的 ASR 识别和文字复核代码处于注释状态，不属于其实际执行流程。
 
-网页默认使用 `zh_cn` 形式的语种地区代码，输入中文名、英文名、地区代码或 ISO 代码即可搜索。目录包含 172 个地区选项、123 个语种；也可直接输入三字母 ISO 639-3 代码。语言信息参考 [MMS ISO 信息表](https://github.com/MXuer/mms-alignment-tools/blob/main/MMS_ISO_Information.md)。
+网页中的语种默认为空，提交任务前须填写或选择；输入中文名、英文名、`zh_cn` 等地区代码或 ISO 代码即可搜索。目录包含 172 个地区选项、123 个语种；也可直接输入三字母 ISO 639-3 代码。语言信息参考 [MMS ISO 信息表](https://github.com/MXuer/mms-alignment-tools/blob/main/MMS_ISO_Information.md)。
+
+单个和批量提交前，服务会在本机对文本进行语种检查；明显不一致时弹窗提示，可确认后继续。短文本、相近语种、混合语言或检测模型未覆盖的语种可能无法可靠判断，不会当作确定一致。检查时会忽略句首 ID 和 `【】` 中的标注。
 
 ## 网页和 API
 
@@ -42,6 +44,8 @@ python -m alignment_web.app
 ```
 
 在服务器本机打开 `http://127.0.0.1:10076/`，或在同一网络的 MacBook 上打开 `http://服务器IP:10076/`。上传音频并填写文本或上传文本文件，选择语言后提交。上传的音频会先转换并验证为 16 kHz 单声道 WAV，成功后删除原上传文件，仅保留转换后的音频供对齐、试听和重试。任务详情中可查看波形、逐句 ID、文本和起止时间，点击句子播放；波形支持缩放和拖动。任务排队执行，每次对齐在独立进程中运行，结束后释放该进程占用的 GPU 显存；其他进程的显存不受影响。可查看状态、输入和结果；下载默认选择 CSV，也可选择 TextGrid 和文本。结果以原音频文件名加格式后缀命名，批量下载的压缩包内不套子文件夹，同名文件自动加序号。管理员可删除已完成或失败的任务。任务与文件默认保存在 `service_data/`；进程重启时未完成的运行中任务会标记失败，排队任务会继续。
+
+选择“批量上传”后，可分别多选音频和 `.txt` 文本，系统按去除扩展名的相同文件名配对，例如 `sample.wav` 和 `sample.txt`。缺失或重名项会弹窗列出，确认后提交其余配对；任务列表可按批次筛选并下载该批次已完成的结果。
 
 用户输入邮箱用户名，系统自动补全 `@dataoceanai.com`，通过验证码登录，首次验证时自动创建账号。管理员账号为 `duhu`，可管理用户状态和管理员权限，并在任务列表按用户筛选；普通用户只能访问自己的任务，迁移前的无主任务由管理员查看。仅管理员可以在网页的“API 密钥”页面创建和撤销密钥，密钥明文只显示一次。不要以多个服务进程共享同一任务目录运行。音频默认上限为 2048 MiB，文本上限为 2 MiB。
 

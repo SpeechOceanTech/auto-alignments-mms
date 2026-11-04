@@ -35,7 +35,7 @@ async function checkSession() {
 async function health() { try { const response = await fetch('/health'); if (!response.ok) throw new Error(); $('#health').className = 'service-status online'; $('#health').title = '服务在线'; $('#health').setAttribute('aria-label', '服务在线'); } catch (_) { $('#health').className = 'service-status offline'; $('#health').title = '服务离线'; $('#health').setAttribute('aria-label', '服务离线'); } }
 $('#login-code').onclick = async () => { const email = $('#account-email').value.trim(); if (!email) { $('#account-message').textContent = '请输入邮箱'; return; } $('#login-code').disabled = true; try { await request('/api/auth/request-code', json({email})); $('#account-message').textContent = '如果邮箱符合条件，验证码将发送至邮箱。'; } catch (e) { $('#account-message').textContent = e.message; } finally { $('#login-code').disabled = false; } };
 $('#account-email').addEventListener('input', (event) => { event.target.value = event.target.value.replace(/@dataoceanai\.com$/i, ''); });
-$('#verify-code').onclick = async () => { const email = $('#account-email').value.trim(), code = $('#account-code').value.trim(); if (!email || !code) { $('#account-message').textContent = '请输入邮箱和验证码'; return; } $('#verify-code').disabled = true; try { const data = await request('/api/auth/verify-code', json({email, code})); showAccount(data.user, data.csrf_token); $('#account-message').textContent = ''; loadLanguages(); refresh(); } catch (e) { $('#account-message').textContent = e.message; } finally { $('#verify-code').disabled = false; } };
+$('#verify-code').onclick = async () => { const email = $('#account-email').value.trim(), code = $('#account-code').value.trim(); if (!email || !code) { $('#account-message').textContent = '请输入邮箱和验证码'; return; } $('#verify-code').disabled = true; try { const data = await request('/api/auth/verify-code', json({email, code})); showAccount(data.user, data.csrf_token); $('#account-message').textContent = ''; loadLanguages(); loadBatches(); refresh(); } catch (e) { $('#account-message').textContent = e.message; } finally { $('#verify-code').disabled = false; } };
 $('#account-code').addEventListener('keydown', (event) => { if (event.key === 'Enter') $('#verify-code').click(); });
 $('#logout').onclick = async () => { try { await request('/api/auth/logout', {method:'POST'}); showAccount(null); } catch (e) { alert(e.message); } };
 function switchTab(tab) {
@@ -143,7 +143,7 @@ function setupLanguagePicker(inputId, optionsId) {
   input.addEventListener('keydown', event => { if (event.key === 'Escape') { close(); return; } if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { if (options.hidden) draw(true); if (!matches.length) return; event.preventDefault(); active = (active + (event.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length; highlight(); } else if (event.key === 'Enter' && !options.hidden && active >= 0) { event.preventDefault(); choose(active); } });
 }
 setupLanguagePicker('#language', '#language-options'); setupLanguagePicker('#filter-language', '#filter-language-options');
-function filters() { const query = new URLSearchParams({limit: state.limit, offset: state.offset}); for (const [id, name] of [['filter-language','language'], ['filter-status','status'], ['filter-q','q'], ['filter-from','created_from'], ['filter-to','created_to']]) { const value = $(`#${id}`).value.trim(); if (value) query.set(name, value); } if (state.user?.is_admin && $('#filter-owner').value) query.set('owner_id', $('#filter-owner').value); return query; }
+function filters() { const query = new URLSearchParams({limit: state.limit, offset: state.offset}); for (const [id, name] of [['filter-batch','batch_id'], ['filter-language','language'], ['filter-status','status'], ['filter-q','q'], ['filter-from','created_from'], ['filter-to','created_to']]) { const value = $(`#${id}`).value.trim(); if (value) query.set(name, value); } if (state.user?.is_admin && $('#filter-owner').value) query.set('owner_id', $('#filter-owner').value); return query; }
 function updateSelection() { const selectable = state.jobs.filter(j => j.status === 'completed' || j.status === 'failed'); const checked = selectable.filter(j => state.selected.has(j.id)); $('#select-all').checked = !!selectable.length && checked.length === selectable.length; $('#select-all').indeterminate = !!checked.length && checked.length < selectable.length; $('#delete-selected').disabled = !state.selected.size; $('#download-selected').disabled = !state.selected.size; $('#selection-count').textContent = state.selected.size ? `已选 ${state.selected.size} 项` : '';  }
 let copyMessageUntil = 0;
 async function copyText(value) {
@@ -190,8 +190,9 @@ $('#download-selected').onclick = () => {
   fetch(`/v1/jobs/bulk-artifacts.zip?${query}`).then(async response => { if (!response.ok) { let data = {}; try { data = await response.json(); } catch (_) {} throw new Error(data.detail || `下载失败 (${response.status})`); } return response.blob(); }).then(blob => { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'alignment-results.zip'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }).catch(error => { $('#jobs-message').textContent = error.message; });
 };
 $('#refresh').onclick = async () => { await refresh(); if (state.user?.is_admin) await loadFilterUsers(state.user.id); }; $('#prev-page').onclick = () => { state.offset = Math.max(0, state.offset - state.limit); refresh(); }; $('#next-page').onclick = () => { state.offset += state.limit; refresh(); };
-let filterTimer; for (const id of ['filter-language','filter-status','filter-q','filter-from','filter-to','filter-owner']) $(`#${id}`).addEventListener('input', () => { clearTimeout(filterTimer); filterTimer = setTimeout(() => { state.offset = 0; state.selected.clear(); refresh(); }, 300); });
-$('#clear-filters').onclick = () => { for (const id of ['filter-language','filter-status','filter-q','filter-from','filter-to','filter-owner']) $(`#${id}`).value = ''; state.offset = 0; state.selected.clear(); refresh(); };
+let filterTimer; for (const id of ['filter-batch','filter-language','filter-status','filter-q','filter-from','filter-to','filter-owner']) $(`#${id}`).addEventListener('input', () => { clearTimeout(filterTimer); filterTimer = setTimeout(() => { state.offset = 0; state.selected.clear(); refresh(); }, 300); });
+$('#filter-batch').addEventListener('change', () => { $('#download-batch').disabled = !$('#filter-batch').value; });
+$('#clear-filters').onclick = () => { $('#download-batch').disabled = true; for (const id of ['filter-batch','filter-language','filter-status','filter-q','filter-from','filter-to','filter-owner']) $(`#${id}`).value = ''; state.offset = 0; state.selected.clear(); refresh(); };
 const reviewAudio = $('#review-audio');
 const waveform = new WaveformReview($('#waveform'), reviewAudio);
 let reviewEpoch = 0, reviewSegments = [], reviewRows = [], activeRow = -1, playUntil = null, playTimer = null;
@@ -234,5 +235,135 @@ async function showReview(job) {
   } catch(error) { if (current()) listMessage(error.message); }
 }
 $('#close-review').onclick = closeReview;
-$('#submit-form').addEventListener('submit', (event) => { event.preventDefault(); const file = $('#text-file').files.length, text = $('#text').value.trim(); if ((!file && !text) || (file && text)) { $('#submit-message').textContent = file ? '请只使用一种文本输入方式' : '请输入文本或选择文本文件'; return; } const body = new FormData(event.currentTarget); if (!file) body.delete('text_file'); const xhr = new XMLHttpRequest(); xhr.open('POST', '/v1/jobs'); if (state.csrf) xhr.setRequestHeader('X-CSRF-Token', state.csrf); $('#submit').disabled = true; $('#upload-progress').hidden = false; $('#upload-progress-bar').style.width = '0%'; $('#upload-progress-text').textContent = '正在上传…'; xhr.upload.onprogress = (e) => { if (e.lengthComputable) { const pct = Math.round(e.loaded / e.total * 100); $('#upload-progress-bar').style.width = `${pct}%`; $('#upload-progress-text').textContent = `上传中 ${pct}%`; } }; xhr.onload = () => { let data = {}; try { data = JSON.parse(xhr.responseText); } catch (_) {} if (xhr.status >= 200 && xhr.status < 300) { $('#submit-message').textContent = `已提交：${data.job_id}`; event.target.reset(); state.offset = 0; refresh(); } else { $('#submit-message').textContent = typeof data.detail === 'string' ? data.detail : `提交失败 (${xhr.status})`; if (xhr.status === 401) showAccount(null); } $('#submit').disabled = false; $('#upload-progress').hidden = true; }; xhr.onerror = () => { $('#submit-message').textContent = '上传失败，请检查网络'; $('#submit').disabled = false; $('#upload-progress').hidden = true; }; xhr.send(body); });
-health(); checkSession(); setInterval(() => { health(); refresh(); }, 5000);
+// The batch is registered before files are uploaded individually, so the upload
+// does not buffer several large recordings in the browser or in the server.
+let uploadMode = 'single', batchListVersion = 0, batchList = [], pendingBatch = null;
+function setUploadMode(mode) {
+  uploadMode = mode; const batch = mode === 'batch';
+  $('#single-inputs').hidden = batch; $('#batch-inputs').hidden = !batch;
+  $('#audio').required = !batch; $('#batch-audio').required = batch; $('#batch-text').required = batch;
+  for (const name of ['single', 'batch']) { const button = $(`#mode-${name}`); button.classList.toggle('active', name === mode); button.setAttribute('aria-pressed', String(name === mode)); }
+  $('#submit').textContent = batch ? '检查并提交批次' : '提交任务'; $('#batch-retry-actions').hidden = !batch || !pendingBatch; $('#submit-message').textContent = batch && pendingBatch ? '上次批次有文件上传失败，请重试或放弃后再提交新批次。' : '';
+}
+$('#mode-single').onclick = () => setUploadMode('single'); $('#mode-batch').onclick = () => setUploadMode('batch');
+$('#batch-audio').onchange = () => { $('#batch-audio-count').textContent = `已选择 ${$('#batch-audio').files.length} 个音频文件`; };
+$('#batch-text').onchange = () => { $('#batch-text-count').textContent = `已选择 ${$('#batch-text').files.length} 个文本文件；按相同文件名配对。`; };
+function uploadDialog(title, message, details, noticeOnly = false) {
+  const dialog = $('#upload-dialog'); dialog.returnValue = ''; $('#upload-dialog-cancel').hidden = noticeOnly; $('#upload-dialog-continue').textContent = noticeOnly ? '知道了' : '继续提交'; $('#upload-dialog-title').textContent = title; $('#upload-dialog-message').textContent = message; $('#upload-dialog-details').textContent = details;
+  return new Promise(resolve => { dialog.addEventListener('close', () => resolve(dialog.returnValue === 'continue'), {once:true}); dialog.showModal(); });
+}
+function describePairing(result) {
+  const lines = [];
+  if (result.unmatched_audio?.length) lines.push('缺少同名文本的音频：', ...result.unmatched_audio.map(name => `  ${name}`), '');
+  if (result.unmatched_text?.length) lines.push('缺少同名音频的文本：', ...result.unmatched_text.map(name => `  ${name}`), '');
+  for (const duplicate of result.duplicates || []) lines.push(`文件名重复，无法唯一配对：${duplicate.stem}`, ...(duplicate.audio || []).map(name => `  音频：${name}`), ...(duplicate.text || []).map(name => `  文本：${name}`), '');
+  return lines.join('\n').trim();
+}
+async function checkLanguages(language, texts) {
+  const warnings = [];
+  for (const item of texts) {
+    const result = await request('/v1/language-check', json({language, text:item.text}));
+    if (result.status === 'mismatch') warnings.push(`${item.name ? `${item.name}：` : ''}${result.message}`);
+  }
+  return !warnings.length || await uploadDialog('语种可能不一致', '以下文本与所选语种可能不一致，请确认后再提交。', warnings.join('\n'));
+}
+async function readTextFile(file) { try { return new TextDecoder('utf-8', {fatal:true}).decode(await file.arrayBuffer()); } catch (_) { throw new Error(`文本文件 ${file.name} 无法读取或不是 UTF-8 编码`); } }
+function sendJob(body, index = 0, count = 1) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest(); xhr.open('POST', '/v1/jobs'); if (state.csrf) xhr.setRequestHeader('X-CSRF-Token', state.csrf);
+    xhr.upload.onprogress = e => { if (e.lengthComputable) { const pct = Math.round(e.loaded / e.total * 100); $('#upload-progress-bar').style.width = `${Math.round((index + pct / 100) / count * 100)}%`; $('#upload-progress-text').textContent = count > 1 ? `上传第 ${index + 1} / ${count} 个文件，${pct}%` : `上传中 ${pct}%`; } };
+    xhr.onload = () => { let data = {}; try { data = JSON.parse(xhr.responseText); } catch (_) {} if (xhr.status >= 200 && xhr.status < 300) resolve(data); else { if (xhr.status === 401) showAccount(null); reject(new Error(typeof data.detail === 'string' ? data.detail : `提交失败 (${xhr.status})`)); } };
+    xhr.onerror = () => reject(new Error('上传失败，请检查网络')); xhr.send(body);
+  });
+}
+async function loadBatches(selected) {
+  if (!state.user) return; const version = ++batchListVersion, userId = state.user.id;
+  try {
+    const data = await request('/v1/batches'); if (version !== batchListVersion || state.user?.id !== userId) return;
+    batchList = data.batches; const select = $('#filter-batch'), previous = selected === undefined ? select.value : selected;
+    const options = [new Option('全部批次', '')];
+    for (const batch of data.batches) options.push(new Option(`${batch.id.slice(0, 8)} · ${formatDate(batch.created_at)} · ${batch.language}${state.user?.is_admin && batch.owner_username ? ` · ${batch.owner_username}` : ''} · ${batch.completed}/${batch.total} 完成`, batch.id));
+    select.replaceChildren(...options); select.value = options.some(option => option.value === previous) ? previous : '';
+    $('#download-batch').disabled = !select.value;
+  } catch (error) { if (version === batchListVersion && state.user?.id === userId) $('#jobs-message').textContent = `加载批次失败：${error.message}`; }
+}
+$('#download-batch').onclick = () => {
+  const id = $('#filter-batch').value, formats = selectedDownloadFormats(); if (!id) return;
+  const batch = batchList.find(item => item.id === id);
+  if (batch && !batch.completed) { $('#jobs-message').textContent = '该批次暂无已完成的任务。'; return; }
+  if (batch && batch.completed < batch.total && !confirm(`该批次共 ${batch.total} 组，已完成 ${batch.completed} 组。下载包含目前已完成的结果，是否继续？`)) return;
+  if (!formats.length) { $('#jobs-message').textContent = '请选择至少一种下载格式。'; $('#bulk-format-menu').open = true; return; }
+  const query = new URLSearchParams({formats:formats.join(',')}); if (formats.includes('csv')) query.set('format_version', CSV_EXPORT_VERSION);
+  $('#bulk-format-menu').open = false; $('#jobs-message').textContent = '';
+  fetch(`/v1/batches/${encodeURIComponent(id)}/artifacts.zip?${query}`).then(async response => { if (!response.ok) { let data = {}; try { data = await response.json(); } catch (_) {} throw new Error(data.detail || `下载失败 (${response.status})`); } return response.blob(); }).then(blob => { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = `alignment-batch-${id.slice(0, 8)}.zip`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }).catch(error => { $('#jobs-message').textContent = error.message; });
+};
+$('#refresh').addEventListener('click', () => loadBatches());
+$('#submit-form').addEventListener('submit', async event => {
+  event.preventDefault(); const form = event.currentTarget, language = $('#language').value.trim(), batch = uploadMode === 'batch';
+  const audioFiles = [...$('#batch-audio').files], textFiles = [...$('#batch-text').files], textFile = $('#text-file').files[0], text = $('#text').value.trim();
+  if (!language) { $('#submit-message').textContent = '请选择或输入语种'; return; }
+  if (batch && pendingBatch) { $('#submit-message').textContent = '上次批次有文件上传失败，请重试或放弃后再提交新批次。'; return; }
+  if (!batch && ((!textFile && !text) || (textFile && text))) { $('#submit-message').textContent = textFile ? '请只使用一种文本输入方式' : '请输入文本或选择文本文件'; return; }
+  const singleBody = batch ? null : new FormData(form);
+  $('#submit').disabled = true; $('#mode-single').disabled = true; $('#mode-batch').disabled = true; for (const id of ['language','audio','text-file','text','batch-audio','batch-text']) $(`#${id}`).disabled = true; $('#submit-message').textContent = '正在检查…';
+  try {
+    if (!batch) {
+      const content = textFile ? await readTextFile(textFile) : text;
+      if (!await checkLanguages(language, [{name:textFile?.name || '', text:content}])) { $('#submit-message').textContent = '已取消提交'; return; }
+      const body = singleBody; if (!textFile) body.delete('text_file');
+      $('#upload-progress').hidden = false; $('#upload-progress-bar').style.width = '0%'; $('#upload-progress-text').textContent = '正在上传…';
+      const data = await sendJob(body); $('#submit-message').textContent = `已提交：${data.job_id}`; form.reset(); state.offset = 0; refresh(); return;
+    }
+    const names = {audio_names:audioFiles.map(file => file.name), text_names:textFiles.map(file => file.name)};
+    const checked = await request('/v1/batches/check', json(names)); const details = describePairing(checked), initialCount = checked.pairs.length;
+    if (!initialCount) { if (details) await uploadDialog('没有可配对的文件', '请检查文件名后重新选择。', details, true); $('#submit-message').textContent = '没有可配对的文件'; return; }
+    if (details && !await uploadDialog('部分文件未能配对', `将检查并提交 ${initialCount} 组匹配文件；以下文件不会上传。`, details)) { $('#submit-message').textContent = '已取消提交'; return; }
+    const audioByName = new Map(audioFiles.map(file => [file.name, file])), textByName = new Map(textFiles.map(file => [file.name, file]));
+    const validPairs = [], invalid = [], warnings = [];
+    for (const pair of checked.pairs) {
+      $('#submit-message').textContent = `正在检查文本 ${validPairs.length + invalid.length + 1} / ${initialCount}…`;
+      const file = textByName.get(pair.text); let content;
+      try {
+        if (file.size > 2 * 1024 * 1024) throw new Error('文本文件超过 2 MB');
+        content = await readTextFile(file);
+        if (!content.trim() || content.includes('\0')) throw new Error('文本为空或包含无效字符');
+      } catch (error) { invalid.push(`${pair.text}：${error.message}`); continue; }
+      const result = await request('/v1/language-check', json({language, text:content}));
+      if (result.status === 'mismatch') warnings.push(`${pair.text}：${result.message}`);
+      validPairs.push(pair);
+    }
+    const count = validPairs.length;
+    if (invalid.length && !count) { await uploadDialog('文本文件无法提交', '以下文件存在问题，未创建任务。', invalid.join('\n'), true); $('#submit-message').textContent = '没有可提交的文件'; return; }
+    if (invalid.length && !await uploadDialog('部分文本文件无法提交', `以下文件不会上传；可继续提交其余 ${count} 组文件。`, invalid.join('\n'))) { $('#submit-message').textContent = '已取消提交'; return; }
+    if (warnings.length && !await uploadDialog('语种可能不一致', '以下文本与所选语种可能不一致，请确认后再提交。', warnings.join('\n'))) { $('#submit-message').textContent = '已取消提交'; return; }
+    const manifest = {audio_names:validPairs.map(pair => pair.audio), text_names:validPairs.map(pair => pair.text), language};
+    const created = await request('/v1/batches', json(manifest)); const errors = [], failedPairs = [];
+    $('#upload-progress').hidden = false; $('#upload-progress-bar').style.width = '0%';
+    for (let i = 0; i < validPairs.length; i++) {
+      const pair = validPairs[i], body = new FormData(); body.append('language', language); body.append('batch_id', created.batch_id); body.append('audio', audioByName.get(pair.audio)); body.append('text_file', textByName.get(pair.text));
+      try { await sendJob(body, i, count); } catch (error) { errors.push(`${pair.audio}：${error.message}`); failedPairs.push({pair, audio:audioByName.get(pair.audio), text:textByName.get(pair.text)}); }
+    }
+    for (const id of ['filter-language','filter-status','filter-q','filter-from','filter-to','filter-owner']) $(`#${id}`).value = '';
+    await loadBatches(created.batch_id); state.offset = 0; state.selected.clear(); await refresh();
+    $('#submit-message').textContent = `批次已提交 ${count - errors.length} / ${count} 组${errors.length ? `，${errors.length} 组上传失败` : ''}。`;
+    if (errors.length) { pendingBatch = {id:created.batch_id, ownerId:state.user?.id, language, items:failedPairs}; $('#batch-retry-actions').hidden = false; await uploadDialog('部分文件上传失败', '已提交的任务会继续处理；可使用“重试失败上传”继续提交至同一批次。', errors.join('\n'), true); }
+    else { form.reset(); $('#batch-audio-count').textContent = '尚未选择音频文件'; $('#batch-text-count').textContent = '音频与文本按相同文件名配对，例如 sample.wav 和 sample.txt。'; }
+  } catch (error) { $('#submit-message').textContent = error.message || '提交失败，请检查网络'; }
+  finally { $('#submit').disabled = false; $('#mode-single').disabled = false; $('#mode-batch').disabled = false; for (const id of ['language','audio','text-file','text','batch-audio','batch-text']) $(`#${id}`).disabled = false; $('#upload-progress').hidden = true; }
+});
+$('#batch-dismiss').onclick = () => { pendingBatch = null; $('#batch-retry-actions').hidden = true; $('#submit-message').textContent = '已放弃重试；已提交的任务仍会继续处理。'; };
+$('#batch-retry').onclick = async () => {
+  if (!pendingBatch) return;
+  if (pendingBatch.ownerId !== state.user?.id) { pendingBatch = null; $('#batch-retry-actions').hidden = true; $('#submit-message').textContent = '用户已切换，请重新选择文件。'; return; }
+  const current = pendingBatch, failed = [], errors = []; $('#batch-retry').disabled = true; $('#batch-dismiss').disabled = true; $('#submit').disabled = true; $('#mode-single').disabled = true; $('#mode-batch').disabled = true; $('#upload-progress').hidden = false;
+  try {
+    for (let i = 0; i < current.items.length; i++) {
+      const item = current.items[i], body = new FormData(); body.append('language', current.language); body.append('batch_id', current.id); body.append('audio', item.audio); body.append('text_file', item.text);
+      try { await sendJob(body, i, current.items.length); } catch (error) { failed.push(item); errors.push(`${item.pair.audio}：${error.message}`); }
+    }
+    current.items = failed; await loadBatches(current.id); state.offset = 0; await refresh();
+    if (failed.length) { $('#submit-message').textContent = `仍有 ${failed.length} 组上传失败，可继续重试。`; await uploadDialog('部分文件上传失败', '可继续重试，已提交的任务会继续处理。', errors.join('\n'), true); }
+    else { pendingBatch = null; $('#batch-retry-actions').hidden = true; $('#submit-message').textContent = '失败的文件已全部提交。'; $('#batch-audio').value = ''; $('#batch-text').value = ''; $('#batch-audio-count').textContent = '尚未选择音频文件'; $('#batch-text-count').textContent = '音频与文本按相同文件名配对，例如 sample.wav 和 sample.txt。'; }
+  } finally { $('#batch-retry').disabled = false; $('#batch-dismiss').disabled = false; $('#submit').disabled = false; $('#mode-single').disabled = false; $('#mode-batch').disabled = false; $('#upload-progress').hidden = true; }
+};
+health(); checkSession().then(() => loadBatches()); setInterval(() => { health(); refresh(); }, 5000); setInterval(() => loadBatches(), 15000);
