@@ -96,17 +96,19 @@ class BatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([path.name for path in (Path(self.temp.name) / 'jobs').iterdir()], [jobs[0]['id']])
         self.assertTrue((Path(self.temp.name) / 'jobs' / jobs[0]['id'] / 'normalized.wav').exists())
 
-    async def test_legacy_standard_arabic_batch_and_filter(self):
-        store = self.app.state.store
-        batch_id = 'a' * 32
-        store.create_batch(batch_id, 'owner', 'ar_001', [{'audio': 'A.wav', 'text': 'a.txt'}])
-        status, result = await self.upload(batch_id, language='ar_msa')
-        self.assertEqual(status, 202)
-        with store.connect() as db:
-            db.execute("UPDATE jobs SET language='ar_001' WHERE id=?", (result['job_id'],))
+    async def test_standard_arabic_batch_and_filter(self):
+        manifest = {'audio_names': ['A.wav'], 'text_names': ['a.txt'], 'language': 'ar_msa'}
+        status, data = await self.request_json('/v1/batches', {**manifest, 'language': 'ar_001'})
+        self.assertEqual(status, 400)
+        status, data = await self.request_json('/v1/batches', manifest)
+        self.assertEqual(status, 201)
+        batch_id = json.loads(data)['batch_id']
+        self.assertEqual((await self.upload(batch_id, language='ar_001'))[0], 400)
+        self.assertEqual((await self.upload(batch_id, language='ar_msa'))[0], 202)
         status, data = await call(self.app, 'GET', '/v1/jobs?language=ar_msa')
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(data)['total'], 1)
+        self.assertEqual((await call(self.app, 'GET', '/v1/jobs?language=ar_001'))[0], 400)
 
     async def test_same_pair_atomic_duplicate_submission(self):
         manifest = {'audio_names': ['A.wav'], 'text_names': ['a.txt'], 'language': 'en_us'}

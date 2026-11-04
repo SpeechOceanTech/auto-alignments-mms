@@ -159,7 +159,7 @@ _VARIETIES = {
     'spa': [('es_es', '欧洲西班牙语', None, '西班牙西班牙语'),
             ('es_mx', '墨西哥西班牙语', None, ''), ('es_ar', '阿根廷西班牙语', None, '')],
     'por': [('pt_br', '巴西葡萄牙语', None, '巴葡'), ('pt_pt', '欧洲葡萄牙语', None, '欧葡')],
-    'ara': [('ar_msa', '现代标准阿拉伯语', 'arb', 'ar_001|标准阿拉伯语|现代标准阿语|Modern Standard Arabic'),
+    'ara': [('ar_msa', '现代标准阿拉伯语', 'arb', '标准阿拉伯语|现代标准阿语|Modern Standard Arabic'),
             ('ar_sa', '沙特阿拉伯语', None, '沙特阿语|Saudi Arabic'),
             ('ar_eg', '埃及阿拉伯语', 'arz', '埃及阿语|Egyptian Arabic'),
             ('ar_iq', '伊拉克阿拉伯语', 'acm', '伊拉克阿语|Iraqi Arabic'),

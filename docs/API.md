@@ -46,7 +46,7 @@ Authorization: Bearer <API_KEY>
 
 ## 输入与语种
 
-`GET /v1/languages` 返回 `{"languages":[...]}`；每项包含 `code`、具体语种或变体的 `name`、`iso`、`english`、`aliases`，以及兼容字段 `language_name`、`region`。例如 `zh_cn` 对应普通话，`ar_msa` 对应现代标准阿拉伯语，`ar_eg` 对应埃及阿拉伯语，`ar_ma` 对应摩洛哥阿拉伯语；之前的 `ar_001` 仍可用作 `ar_msa` 的别名。提交任务可使用列表中的代码、语言名称或别名，也可输入原有地区代码和三字母 ISO 639-3 代码。未列入列表的代码通过格式校验不代表模型必然支持。
+`GET /v1/languages` 返回 `{"languages":[...]}`；每项包含 `code`、具体语种或变体的 `name`、`iso`、`english`、`aliases`，以及兼容字段 `language_name`、`region`。例如 `zh_cn` 对应普通话，`ar_msa` 对应现代标准阿拉伯语，`ar_eg` 对应埃及阿拉伯语，`ar_ma` 对应摩洛哥阿拉伯语。提交任务可使用列表中的代码、语言名称或别名，也可输入原有地区代码和三字母 ISO 639-3 代码。未列入列表的代码通过格式校验不代表模型必然支持。
 
 文本使用 UTF-8（可带 BOM），每个非空行是一句；也支持 `ID<TAB>句子`。对齐时忽略 `【】` 内的标注，结果保留原文；这不是语音识别，文本应与录音内容和顺序一致。
 

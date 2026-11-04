@@ -64,7 +64,7 @@ class LanguageCheckTest(unittest.TestCase):
     def test_arabic_varieties_check_script_without_claiming_dialect(self):
         arabic = ('اليوم سنتحدث عن كيفية العمل معًا ومساعدة الجميع على إيجاد حلول '
                   'مناسبة وتحقيق نتائج أفضل في المستقبل. ') * 4
-        for locale in ('ar_msa', 'ar_001', 'ar_eg', 'ar_ma', 'ar_dz', 'ar_iq', 'ar_ae', 'ar_jo', 'ar_sa'):
+        for locale in ('ar_msa', 'ar_eg', 'ar_ma', 'ar_dz', 'ar_iq', 'ar_ae', 'ar_jo', 'ar_sa'):
             with self.subTest(locale=locale):
                 self.assertEqual(check_language(locale, CHINESE)['status'], 'mismatch')
                 self.assertNotEqual(check_language(locale, arabic)['status'], 'mismatch')
@@ -78,6 +78,7 @@ class LanguageCheckTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()['status'], 'mismatch')
             self.assertEqual(client.post('/v1/language-check', json={'language': '', 'text': ENGLISH}).status_code, 400)
+            self.assertEqual(client.post('/v1/language-check', json={'language': 'ar_001', 'text': ENGLISH}).status_code, 400)
             self.assertEqual(client.post('/v1/language-check', json={'language': 'en_us', 'text': ''}).status_code, 400)
             self.assertEqual(client.post('/v1/language-check', json={'text': ENGLISH}).status_code, 422)
             self.assertEqual(client.post('/v1/language-check', json={'language': 'en_us', 'text': 'a' * (2 * 1024 * 1024 + 1)}).status_code, 413)

@@ -59,8 +59,10 @@ class LanguageTests(unittest.TestCase):
         choices = {item['code']: item['name'] for item in COMMON_LANGUAGES}
         self.assertEqual(choices['ar_msa'], '现代标准阿拉伯语')
         self.assertNotIn('ar_001', choices)
-        self.assertEqual(canonical_locale('ar_001'), 'ar_msa')
-        self.assertEqual(normalize_language('ar_001'), 'arb')
+        with self.assertRaises(ValueError):
+            canonical_locale('ar_001')
+        with self.assertRaises(ValueError):
+            normalize_language('ar_001')
         self.assertEqual(choices['ar_ma'], '摩洛哥阿拉伯语')
         self.assertEqual(normalize_language('ar_ma'), 'ary')
         self.assertEqual(normalize_language('摩洛哥阿拉伯语'), 'ary')
