@@ -31,7 +31,7 @@ export ALIGN_DEVICE=cuda:0
 
 CSV 按原流程的 Adobe Audition 标记格式输出：UTF-8、制表符分隔，字段为 `Name`、`Start`、`Duration`、`Time Format`、`Type`、`Description`；时间采用 `时:分:秒.微秒`，文本保存在 `Description`。文本结果的 `start` 和 `end` 单位为秒，TextGrid 使用 `sentences` interval tier。处理流程与原脚本一致：转换为 16 kHz 单声道，使用 Silero VAD 检测语音，以 MMS 对齐文本，再根据静音区间修正句子边界。原脚本中的 ASR 识别和文字复核代码处于注释状态，不属于其实际执行流程。
 
-网页中的语种默认为空，提交任务前须填写或选择；输入中文名、英文名、`zh_cn` 等地区代码或 ISO 代码即可搜索。目录包含 172 个地区选项、123 个语种；也可直接输入三字母 ISO 639-3 代码。语言信息参考 [MMS ISO 信息表](https://github.com/MXuer/mms-alignment-tools/blob/main/MMS_ISO_Information.md)。
+网页中的语种默认为空，提交任务前须填写或选择；输入中文名、英文名、`zh_cn` 等代码或 ISO 代码即可搜索。列表按具体语种或变体展示，例如现代标准阿拉伯语和埃及阿拉伯语；原有地区代码及三字母 ISO 639-3 代码仍可直接输入。语言信息参考 [MMS ISO 信息表](https://github.com/MXuer/mms-alignment-tools/blob/main/MMS_ISO_Information.md)。
 
 网页提交前，服务会在本机对文本进行语种检查；明显不一致时弹窗提示，可确认后继续。短文本、相近语种、混合语言或检测模型未覆盖的语种可能无法可靠判断，不会当作确定一致。检查时会忽略句首 ID 和 `【】` 中的标注。
 

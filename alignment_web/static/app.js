@@ -110,34 +110,15 @@ function setupLanguagePicker(inputId, optionsId) {
     const query = showAll ? '' : input.value.trim().toLowerCase().replaceAll('-', '_');
     matches = languageChoices.filter(item => [item.code, item.name, item.iso, item.english, ...(item.aliases || [])].some(value => String(value || '').toLowerCase().replaceAll('-', '_').includes(query)));
     matches.sort((a, b) => Number(b.code.toLowerCase() === query) - Number(a.code.toLowerCase() === query));
-    // Keep each language together while retaining the original order within it.
-    const groups = new Map();
-    for (const item of matches) {
-      const key = item.iso || item.english || item.name;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(item);
-    }
-    matches = [...groups.values()].flat();
     options.replaceChildren(); active = -1;
     if (!matches.length) { close(); return; }
-    let index = 0;
-    for (const items of groups.values()) {
-      const first = items[0];
-      const languageName = first.language_name || first.aliases?.[1] || first.name.replace(/（[^（）]*）$/, '');
-      const heading = node('div', undefined, 'language-group-heading');
-      heading.setAttribute('role', 'presentation');
-      heading.append(node('span', languageName, 'language-group-name'), node('span', first.english, 'language-group-english'));
-      options.append(heading);
-      for (const item of items) {
-        const optionIndex = index++;
-        const region = item.region || item.name.slice(languageName.length).replace(/^（|）$/g, '').replace(/，[^，]+$/, '');
-        const el = node('div', undefined, 'language-option');
-        el.id = `${options.id}-${optionIndex}`; el.setAttribute('role', 'option'); el.setAttribute('aria-selected', 'false');
-        el.setAttribute('aria-label', `${item.name} ${item.code}`);
-        el.append(node('span', region || item.name, 'language-region'), node('span', item.code, 'language-code'));
-        el.onmousedown = event => event.preventDefault(); el.onclick = () => choose(optionIndex); options.append(el);
-      }
-    }
+    matches.forEach((item, index) => {
+      const el = node('div', undefined, 'language-option');
+      el.id = `${options.id}-${index}`; el.setAttribute('role', 'option'); el.setAttribute('aria-selected', 'false');
+      el.setAttribute('aria-label', `${item.name} ${item.code}`);
+      el.append(node('span', item.name, 'language-name'), node('span', item.code, 'language-code'));
+      el.onmousedown = event => event.preventDefault(); el.onclick = () => choose(index); options.append(el);
+    });
     options.hidden = false; input.setAttribute('aria-expanded', 'true');
   }
   input.addEventListener('focus', () => { draw(true); input.select(); }); input.addEventListener('input', () => draw()); input.addEventListener('blur', close);

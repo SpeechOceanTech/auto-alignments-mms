@@ -36,16 +36,31 @@ class LanguageTests(unittest.TestCase):
     def test_choices_are_distinct_and_usable(self):
         codes = [item["code"] for item in COMMON_LANGUAGES]
         self.assertEqual(len(codes), len(set(codes)))
-        self.assertGreater(len(codes), 120)
+        names = [item['name'] for item in COMMON_LANGUAGES]
+        self.assertEqual(len(names), len(set(names)))
         self.assertGreaterEqual(len({item['iso'] for item in COMMON_LANGUAGES}), 100)
         for item in COMMON_LANGUAGES:
             self.assertEqual(canonical_locale(item['code']), item['code'])
             self.assertEqual(normalize_language(item['code']), item['iso'])
             self.assertEqual(canonical_locale(item['name']), item['code'])
-            self.assertTrue(item['name'].startswith(item['language_name'] + '（'))
-            self.assertIn(item['region'], item['name'])
+            self.assertEqual(item['name'], item['language_name'])
         nested = next(item for item in COMMON_LANGUAGES if item['code'] == 'ln_cd')
         self.assertEqual((nested['language_name'], nested['region']), ('林加拉语', '刚果（金）'))
+
+    def test_named_varieties_and_legacy_locale_inputs(self):
+        choices = {item['code']: item['name'] for item in COMMON_LANGUAGES}
+        self.assertEqual(choices['ar_001'], '现代标准阿拉伯语')
+        self.assertEqual(choices['ar_eg'], '埃及阿拉伯语')
+        self.assertEqual(normalize_language('标准阿拉伯语'), 'arb')
+        self.assertEqual(normalize_language('埃及阿拉伯语'), 'arz')
+        self.assertEqual(normalize_language('ar_sa'), 'ara')
+        self.assertEqual(canonical_locale('阿拉伯语（沙特阿拉伯）'), 'ar_sa')
+        self.assertEqual(canonical_locale('阿拉伯语（埃及）'), 'ar_eg')
+        self.assertEqual(canonical_locale('English'), 'en_us')
+        self.assertEqual(canonical_locale('American English'), 'en_us')
+        self.assertEqual(canonical_locale('British English'), 'en_gb')
+        self.assertEqual(canonical_locale('英语（新加坡）'), 'en_sg')
+        self.assertEqual(normalize_language('en_sg'), 'eng')
 
 
 if __name__ == "__main__":

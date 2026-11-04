@@ -19,13 +19,12 @@ class Element {
 const input = new Element(), options = new Element();
 input.value = 'zh_cn';
 const languageChoices = [
-  {code:'zh_cn', name:'中文（普通话）（中国大陆）', iso:'cmn', english:'Mandarin Chinese'},
-  {code:'zh_tw', name:'中文（普通话）（中国台湾）', iso:'cmn', english:'Mandarin Chinese'},
-  {code:'ct_hk', name:'粤语（中国香港，ct_hk）', iso:'yue', english:'Cantonese'},
-  {code:'yue_hk', name:'粤语（中国香港，yue_hk）', iso:'yue', english:'Cantonese'},
-  {code:'en_us', name:'英语（美国）', iso:'eng', english:'English'},
-  {code:'ceb_ph', name:'宿务语（菲律宾）', iso:'ceb', english:'Cebuano'},
-  {code:'ln_cd', name:'林加拉语（刚果（金））', iso:'lin', english:'Lingala', language_name:'林加拉语', region:'刚果（金）'},
+  {code:'zh_cn', name:'普通话', iso:'cmn', english:'Mandarin Chinese', aliases:['中文']},
+  {code:'zh_tw', name:'台湾普通话', iso:'cmn', english:'Taiwanese Mandarin', aliases:['中文']},
+  {code:'ar_eg', name:'埃及阿拉伯语', iso:'arz', english:'Egyptian Arabic', aliases:['阿拉伯语']},
+  {code:'ar_sa', name:'标准阿拉伯语', iso:'arb', english:'Standard Arabic', aliases:['阿拉伯语']},
+  {code:'en_us', name:'美式英语', iso:'eng', english:'American English'},
+  {code:'ceb_ph', name:'宿务语', iso:'ceb', english:'Cebuano'},
 ];
 const source = fs.readFileSync('alignment_web/static/app.js', 'utf8');
 const start = source.indexOf('function setupLanguagePicker(');
@@ -37,13 +36,11 @@ vm.runInNewContext(source.slice(start, end) + "\nsetupLanguagePicker('#language'
 const choices = () => options.querySelectorAll('[role=option]');
 
 input.dispatchEvent({type:'focus'});
-assert.equal(choices().length, 7, 'focus displays every region even with a default value');
-assert.equal(options.children.filter(child => child.className === 'language-group-heading').length, 5, 'regions are grouped by language');
-assert.equal(options.children[0].children[0].textContent, '中文（普通话）');
-assert.equal(choices()[0].children[0].textContent, '中国大陆');
-assert.equal(choices()[2].children[0].textContent, '中国香港');
-assert.equal(choices()[2].children[1].textContent, 'ct_hk');
-assert.equal(choices()[6].children[0].textContent, '刚果（金）', 'regions with nested parentheses remain intact');
+assert.equal(choices().length, 6, 'focus displays every language even with a default value');
+assert.equal(options.children.length, choices().length, 'languages are shown directly without region groups');
+assert.equal(choices()[0].children[0].textContent, '普通话');
+assert.equal(choices()[2].children[0].textContent, '埃及阿拉伯语');
+assert.equal(choices()[2].children[1].textContent, 'ar_eg');
 assert.equal(input.value, 'zh_cn');
 assert.equal(input.selected, true);
 input.value = 'en-US';
@@ -54,12 +51,19 @@ assert.equal(input.value, 'en_us');
 assert.equal(options.hidden, true);
 input.value = '中文';
 input.dispatchEvent({type:'input'});
-assert.equal(choices().length, 2, 'search matches both regions of a Chinese language name');
+assert.equal(choices().length, 2, 'search matches Chinese language aliases');
 input.dispatchEvent({type:'keydown', key:'ArrowDown', preventDefault() {}});
-assert.equal(choices()[0].attributes['aria-selected'], 'true', 'keyboard navigation skips group headings');
+assert.equal(choices()[0].attributes['aria-selected'], 'true', 'keyboard navigation highlights the first match');
 input.dispatchEvent({type:'keydown', key:'ArrowDown', preventDefault() {}});
 input.dispatchEvent({type:'keydown', key:'Enter', preventDefault() {}});
 assert.equal(input.value, 'zh_tw');
+input.value = '阿拉伯';
+input.dispatchEvent({type:'input'});
+assert.deepEqual(choices().map(choice => choice.children[0].textContent), ['埃及阿拉伯语', '标准阿拉伯语']);
+input.value = 'Egyptian';
+input.dispatchEvent({type:'input'});
+assert.equal(choices().length, 1, 'English names remain searchable');
+assert.equal(choices()[0].children[0].textContent, '埃及阿拉伯语');
 input.value = '宿务';
 input.dispatchEvent({type:'input'});
 assert.equal(choices().length, 1);

@@ -1,8 +1,9 @@
-"""Locale choices for the service and ISO 639-3 codes for the MMS engine.
+"""Language choices for the service and ISO 639-3 codes for the MMS engine.
 
 Language ISO codes follow the local MMS ISO information table. Locale spellings
 also include the codes used by the legacy batch pipeline. Regions identify input
-choices, not separate MMS models. Three-letter ISO input remains supported.
+choices, not separate MMS models. Old locale spellings and three-letter ISO
+input remain supported even when they are not listed as separate choices.
 """
 import re
 
@@ -143,6 +144,23 @@ def _key(value):
 COMMON_LANGUAGES = []
 _ALIAS_LOCALES = {}
 _LOCALE_ISOS = {}
+# Explicitly named varieties only: a country code by itself is not enough to
+# establish that the language spoken there is a separate language or dialect.
+# Entries are (locale, display name, optional ISO override, pipe-separated aliases).
+_VARIETIES = {
+    'cmn': [('zh_cn', '普通话', None, '汉语普通话|Mandarin Chinese'), ('zh_tw', '台湾国语', None, '台湾普通话|Taiwanese Mandarin')],
+    'eng': [('en_us', '美式英语', None, '美国英语|American English'),
+            ('en_gb', '英式英语', None, '英国英语|British English'),
+            ('en_au', '澳大利亚英语', None, '澳洲英语|Australian English'),
+            ('en_in', '印度英语', None, 'Indian English')],
+    'fra': [('fr_fr', '法国法语', None, '欧洲法语|European French'), ('fr_ca', '加拿大法语', None, 'Canadian French')],
+    'spa': [('es_es', '欧洲西班牙语', None, '西班牙西班牙语'),
+            ('es_mx', '墨西哥西班牙语', None, ''), ('es_ar', '阿根廷西班牙语', None, '')],
+    'por': [('pt_br', '巴西葡萄牙语', None, '巴葡'), ('pt_pt', '欧洲葡萄牙语', None, '欧葡')],
+    'ara': [('ar_001', '现代标准阿拉伯语', 'arb', '标准阿拉伯语|现代标准阿语|Modern Standard Arabic'),
+            ('ar_eg', '埃及阿拉伯语', 'arz', '埃及阿语|Egyptian Arabic')],
+}
+
 for iso, name, english, locales, extra in _LANGUAGES:
     options = [item.split(':', 1) for item in locales.split()]
     preferred = options[0][0]
@@ -152,12 +170,26 @@ for iso, name, english, locales, extra in _LANGUAGES:
     for locale, region in options:
         duplicate_region = sum(option_region == region for _, option_region in options) > 1
         label = f'{name}（{region}，{locale}）' if duplicate_region else f'{name}（{region}）'
-        COMMON_LANGUAGES.append({'code': locale, 'name': label, 'iso': iso,
-                                 'language_name': name, 'region': region,
-                                 'english': english, 'aliases': aliases})
         _LOCALE_ISOS[locale] = iso
         _ALIAS_LOCALES[_key(locale)] = locale
         _ALIAS_LOCALES[_key(label)] = locale
+
+    regions = dict(options)
+    varieties = _VARIETIES.get(iso, [(preferred, name, None, '')])
+    for locale, label, iso_override, variety_aliases in varieties:
+        variety_iso = iso_override or iso
+        variety_aliases = list(filter(None, variety_aliases.split('|')))
+        option_aliases = list(dict.fromkeys([*aliases, label, *variety_aliases]))
+        COMMON_LANGUAGES.append({'code': locale, 'name': label, 'iso': variety_iso,
+                                 'language_name': label, 'region': regions.get(locale, ''),
+                                 'english': english, 'aliases': option_aliases})
+        _LOCALE_ISOS[locale] = variety_iso
+        _ALIAS_LOCALES[_key(locale)] = locale
+        _ALIAS_LOCALES[_key(label)] = locale
+        for alias in variety_aliases:
+            _ALIAS_LOCALES.setdefault(_key(alias), locale)
+        if iso_override:
+            _ALIAS_LOCALES[_key(iso_override)] = locale
 
 
 def canonical_locale(value: str) -> str:

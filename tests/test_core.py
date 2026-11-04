@@ -24,6 +24,12 @@ class CoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'no alignable characters'):
             romanize([('a', '。')], 'cmn')
 
+    def test_arabic_varieties_use_legacy_arabic_romanization(self):
+        sentences = [('1', 'ٱلسَّلَامُ عَلَيْكُمْ'), ('2', 'كيف حالك اليوم؟')]
+        expected = romanize(sentences, 'ara')
+        self.assertEqual(romanize(sentences, 'arb'), expected)
+        self.assertEqual(romanize(sentences, 'arz'), expected)
+
     def test_bracket_annotations_are_excluded_only_from_alignment(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

@@ -61,6 +61,14 @@ class LanguageCheckTest(unittest.TestCase):
     def test_close_languages_do_not_trigger_false_warning(self):
         self.assertNotEqual(check_language('uk_ua', RUSSIAN)['status'], 'mismatch')
 
+    def test_arabic_varieties_check_script_without_claiming_dialect(self):
+        arabic = ('اليوم سنتحدث عن كيفية العمل معًا ومساعدة الجميع على إيجاد حلول '
+                  'مناسبة وتحقيق نتائج أفضل في المستقبل. ') * 4
+        for locale in ('ar_001', 'ar_eg'):
+            with self.subTest(locale=locale):
+                self.assertEqual(check_language(locale, CHINESE)['status'], 'mismatch')
+                self.assertNotEqual(check_language(locale, arabic)['status'], 'mismatch')
+
     def test_http_contract_and_required_language(self):
         app = FastAPI()
         app.include_router(router)

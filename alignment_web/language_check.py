@@ -33,7 +33,8 @@ _SCRIPT_OVERRIDES = {
     'tgk': {'CYRILLIC'}, 'kaz': {'CYRILLIC', 'LATIN', 'ARABIC'},
     'mon': {'CYRILLIC', 'MONGOLIAN'}, 'srp': {'CYRILLIC', 'LATIN'},
     'uzb': {'CYRILLIC', 'LATIN', 'ARABIC'}, 'aze': {'CYRILLIC', 'LATIN', 'ARABIC'},
-    'ara': {'ARABIC'}, 'fas': {'ARABIC'}, 'urd': {'ARABIC'}, 'pus': {'ARABIC'},
+    'ara': {'ARABIC'}, 'arb': {'ARABIC'}, 'arz': {'ARABIC'},
+    'fas': {'ARABIC'}, 'urd': {'ARABIC'}, 'pus': {'ARABIC'},
     'ckb': {'ARABIC'}, 'uig': {'ARABIC', 'CYRILLIC', 'LATIN'},
     'snd': {'ARABIC', 'DEVANAGARI'}, 'pan': {'GURMUKHI', 'ARABIC'},
     'zsm': {'LATIN', 'ARABIC'}, 'hau': {'LATIN', 'ARABIC'},
@@ -71,7 +72,7 @@ _SCRIPT_LABELS = {'HAN': '汉字', 'LATIN': '拉丁字母', 'CYRILLIC': '西里�
 _RELATED = [
     {'cmn', 'yue', 'nan', 'jpn'}, {'ind', 'zsm'}, {'srp', 'hrv', 'bos'},
     {'nob', 'nno', 'swe', 'dan'}, {'rus', 'ukr', 'bel'}, {'hin', 'mar', 'npi', 'mai', 'awa', 'hne', 'mag'},
-    {'ben', 'asm'}, {'por', 'spa', 'glg', 'cat'},
+    {'ben', 'asm'}, {'por', 'spa', 'glg', 'cat'}, {'ara', 'arb', 'arz'},
 ]
 _DETECT_ALIASES = {'no': 'nb_no', 'zh-cn': 'zh_cn', 'zh-tw': 'zh_tw', 'tl': 'tl_ph'}
 _NAMES = {item['iso']: item['language_name'] for item in COMMON_LANGUAGES}

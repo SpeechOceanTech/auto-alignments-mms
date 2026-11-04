@@ -49,7 +49,9 @@ def read_sentences(path):
 def romanize(sentences, language):
     # Bracketed annotations are metadata, not spoken words. Keep `sentences`
     # untouched so result files and the review page retain the original text.
-    normal = [text_normalize(re.sub(r"【[^】]*】", " ", text), language)
+    # The Arabic varieties share the legacy Arabic normalizer and uroman rules.
+    processing_language = 'ara' if language in ('arb', 'arz') else language
+    normal = [text_normalize(re.sub(r"【[^】]*】", " ", text), processing_language)
               for _, text in sentences]
     for i, line in enumerate(normal):
         if not line.strip():
@@ -59,8 +61,8 @@ def romanize(sentences, language):
     if not script.is_file():
         raise FileNotFoundError(f"uroman.pl not found at {script}; set UROMAN_PATH")
     command = ["perl", str(script)]
-    if language in SPECIAL_ISOS:
-        command += ["-l", language]
+    if processing_language in SPECIAL_ISOS:
+        command += ["-l", processing_language]
     try:
         proc = subprocess.run(command, input="\n".join(normal) + "\n", text=True,
                               encoding="utf-8", capture_output=True, check=True)
