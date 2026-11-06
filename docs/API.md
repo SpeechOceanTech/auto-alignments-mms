@@ -94,7 +94,9 @@ curl -X POST "$BASE/v1/jobs" \
 | `owner_id` | 仅管理员可指定；`__legacy__` 表示无主的旧网页任务 |
 | `batch_id` | 返回指定批次内的任务 |
 
-响应格式 `{"jobs":[...],"total":0,"limit":50,"offset":0}`。任务记录包括 `id`、`language`、`audio_name`、`status`、`created_at`、`updated_at`、`error`、`owner_id` 和 `artifacts`；管理员列表额外包含 `owner_username`。按创建时间倒序排列。
+响应格式 `{"jobs":[...],"total":0,"limit":50,"offset":0}`。任务记录包括 `id`、`language`、`audio_name`、`status`、`created_at`、`updated_at`、`error`、`owner_id` 和 `artifacts`；管理员列表额外包含 `owner_username`。有错误的任务还包含 `error_code` 和供界面显示的 `error_display`：已归类的错误提供可读提示，未归类的错误使用 `unknown` 并保留原始错误。原始 `error` 字段始终保留。按创建时间倒序排列。
+
+错误分类维护在 `alignment_web/error_messages.py`；新增规则时只匹配确认过的错误并补充测试，未命中的错误继续原样显示。
 
 ### 批量上传和批次下载
 

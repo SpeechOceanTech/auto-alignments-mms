@@ -132,6 +132,8 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         job = await self.finished(response['job_id'])
         self.assertEqual(job['status'], 'failed')
         self.assertIn('backend failure', job['error'])
+        self.assertEqual(job['error_code'], 'unknown')
+        self.assertEqual(job['error_display'], job['error'])
         self.assertEqual((await self.submit(audio=b'123456789'))[0], 413)
         self.assertEqual((await self.submit(language='../bad'))[0], 400)
         self.assertEqual((await self.submit(text=''))[0], 400)
@@ -140,6 +142,26 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         body, headers = form({'language': 'eng', 'text': 'hello'}, [('audio', 'a.wav', b'x' * (4 * 1024 * 1024))])
         status, _ = await call(self.app, 'POST', '/v1/jobs', body, headers)
         self.assertEqual(status, 413)
+
+    async def test_known_error_is_explained_for_existing_jobs(self):
+        job_id = 'e' * 32
+        raw = 'Traceback (most recent call last):\nValueError: Sentence 2 has no alignable characters after normalization'
+        directory = Path(self.temp.name) / 'jobs' / job_id
+        directory.mkdir()
+        (directory / 'input.txt').write_text('first\n\nsegment-2\t-\n', encoding='utf-8')
+        with self.app.state.store.connect() as db:
+            db.execute("INSERT INTO jobs (id, language, audio_name, status, error, owner_id) VALUES (?, 'zh_cn', 'sample.wav', 'failed', ?, ?)",
+                       (job_id, raw, self.user['id']))
+        status, content = await call(self.app, 'GET', '/v1/jobs/' + job_id)
+        self.assertEqual(status, 200)
+        detail = json.loads(content)
+        self.assertEqual(detail['error'], raw)
+        self.assertNotEqual(detail['error_code'], 'unknown')
+        self.assertIn('segment-2', detail['error_display'])
+        self.assertIn('3', detail['error_display'])
+        status, content = await call(self.app, 'GET', '/v1/jobs?status=failed')
+        listed = next(job for job in json.loads(content)['jobs'] if job['id'] == job_id)
+        self.assertEqual(listed['error_display'], detail['error_display'])
 
     async def test_restart_marks_running_as_interrupted(self):
         store = self.app.state.store

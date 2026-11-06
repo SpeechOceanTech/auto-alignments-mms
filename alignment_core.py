@@ -23,6 +23,7 @@ from alignment_vad import refine_times, speech_timestamps
 
 ROOT = Path(__file__).resolve().parent
 SAMPLE_RATE = 16000
+EXTRACTOR_CONV_CONFIG = [(512, 10, 5), (512, 3, 2), (512, 3, 2), (512, 3, 2), (512, 3, 2), (512, 2, 2), (512, 2, 2)]
 SPECIAL_ISOS = set("ara bel bul deu ell eng fas grc heb kaz kir lav lit mkd mkd2 oss pnt pus rus srp srp2 tur uig ukr yid".split())
 
 
@@ -105,7 +106,7 @@ def _load_model():
         raise ValueError("MMS dictionary does not contain <blank>")
     device = os.environ.get("ALIGN_DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
     model = torchaudio.models.wav2vec2_model(
-        extractor_mode="layer_norm", extractor_conv_layer_config=[(512, 10, 5), (512, 3, 2), (512, 3, 2), (512, 3, 2), (512, 3, 2), (512, 2, 2), (512, 2, 2)],
+        extractor_mode="layer_norm", extractor_conv_layer_config=EXTRACTOR_CONV_CONFIG,
         extractor_conv_bias=True, encoder_embed_dim=1024, encoder_projection_dropout=0.0,
         encoder_pos_conv_kernel=128, encoder_pos_conv_groups=16, encoder_num_layers=24,
         encoder_num_heads=16, encoder_attention_dropout=0.0, encoder_ff_interm_features=4096,
@@ -118,6 +119,40 @@ def _load_model():
     model.load_state_dict(state)
     model.to(device).eval()
     return torch, torchaudio, model, dictionary, device
+
+
+def _emission_frame_count(samples):
+    """Count the frames retained by the same chunking and convolution as MMS."""
+    duration = samples / SAMPLE_RATE
+    total = 0
+    for start in range(0, math.ceil(duration), 30):
+        left, right = max(start - 3, 0), min(start + 33, duration)
+        chunk_samples = min(int(right * SAMPLE_RATE), samples) - int(left * SAMPLE_RATE)
+        frames = chunk_samples
+        for _, kernel, stride in EXTRACTOR_CONV_CONFIG:
+            frames = max(0, (frames - kernel) // stride + 1)
+        begin = int(start * 50) - int(left * 50)
+        end = int((start + 30) * 50) - int(left * 50)
+        total += max(0, min(frames, end) - begin)
+    return total
+
+
+def _required_ctc_frames(tokens):
+    # The target contains a star before and after each nonempty sentence.
+    # Only repeated tokens within a sentence need an additional blank frame.
+    return (len(tokens) + 1 + sum(len(line) for line in tokens)
+            + sum(a == b for line in tokens for a, b in zip(line, line[1:])))
+
+
+def _precheck_ctc(wav, tokens):
+    """Reject only inputs whose CTC target cannot fit in the emitted frames."""
+    with wave.open(str(wav), 'rb') as audio:
+        if audio.getframerate() != SAMPLE_RATE or audio.getnchannels() != 1 or audio.getnframes() == 0:
+            raise ValueError("Converted audio must be nonempty, mono and 16 kHz")
+        frames = _emission_frame_count(audio.getnframes())
+    required = _required_ctc_frames(tokens)
+    if required > frames:
+        raise ValueError(f"Transcript is too long for the supplied audio (requires {required} CTC frames, audio provides {frames})")
 
 
 def _alignment(wav, tokens):
@@ -271,6 +306,7 @@ def align(audio_path, text_path, language, output_dir, *, already_converted=Fals
             wav = audio_path
         else:
             convert_audio(audio_path, wav)
+        _precheck_ctc(wav, tokens)
         speech = speech_timestamps(wav)
         times, duration = _alignment(wav, tokens)
         times = refine_times(times, speech, duration)

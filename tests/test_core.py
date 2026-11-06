@@ -2,9 +2,11 @@ import csv
 from pathlib import Path
 import tempfile
 import unittest
+import wave
 from unittest.mock import patch
 
-from alignment_core import align, read_sentences, romanize, write_outputs, _times_from_path
+from alignment_core import (align, read_sentences, romanize, write_outputs, _times_from_path,
+                            _emission_frame_count, _required_ctc_frames, _precheck_ctc)
 from alignment_vad import refine_times
 
 
@@ -38,7 +40,7 @@ class CoreTests(unittest.TestCase):
             audio.write_bytes(b'fixture')
             original = '你好【笑声】世界！【背景音乐】再见。'
             (root / 'input.txt').write_text(f'line-1\t{original}\n', encoding='utf-8')
-            with patch('alignment_core._alignment', return_value=([(0.1, 1.0)], 1.2)) as alignment, patch('alignment_core.speech_timestamps', return_value=[(0.1, 1.0)]):
+            with patch('alignment_core._precheck_ctc'), patch('alignment_core._alignment', return_value=([(0.1, 1.0)], 1.2)) as alignment, patch('alignment_core.speech_timestamps', return_value=[(0.1, 1.0)]):
                 paths = align(audio, root / 'input.txt', 'zh_cn', root / 'output', already_converted=True)
             self.assertEqual(alignment.call_args.args[1], [list('nihaoshijiezaijian')])
             with paths['csv'].open(encoding='utf-8-sig', newline='') as f:
@@ -73,7 +75,7 @@ class CoreTests(unittest.TestCase):
             (root / 'audio.wav').write_bytes(b'audio')
             (root / 'input.txt').write_text('hello', encoding='utf-8')
             # Exercise orchestration without requiring the large model or ffmpeg.
-            with patch('alignment_core.convert_audio') as convert, patch('alignment_core.romanize', return_value=[list('hello')]) as roman, patch('alignment_core._alignment', return_value=([(0.1, 1.0)], 1.2)), patch('alignment_core.speech_timestamps', return_value=[(0.1, 1.0)]):
+            with patch('alignment_core.convert_audio') as convert, patch('alignment_core._precheck_ctc'), patch('alignment_core.romanize', return_value=[list('hello')]) as roman, patch('alignment_core._alignment', return_value=([(0.1, 1.0)], 1.2)), patch('alignment_core.speech_timestamps', return_value=[(0.1, 1.0)]):
                 result = align(root / 'audio.wav', root / 'input.txt', 'en_us', root / 'output')
             self.assertEqual(roman.call_args.args[1], 'eng')
             self.assertEqual(set(result), {'csv', 'txt', 'textgrid'})
@@ -92,11 +94,52 @@ class CoreTests(unittest.TestCase):
             audio = root / 'normalized.wav'
             audio.write_bytes(b'fixture')
             (root / 'input.txt').write_text('hello')
-            with patch('alignment_core.convert_audio') as convert, patch('alignment_core.romanize', return_value=[list('hello')]), patch('alignment_core._alignment', return_value=([(0.1, 1.0)], 1.2)) as alignment, patch('alignment_core.speech_timestamps', return_value=[(0.1, 1.0)]) as vad:
+            with patch('alignment_core.convert_audio') as convert, patch('alignment_core._precheck_ctc'), patch('alignment_core.romanize', return_value=[list('hello')]), patch('alignment_core._alignment', return_value=([(0.1, 1.0)], 1.2)) as alignment, patch('alignment_core.speech_timestamps', return_value=[(0.1, 1.0)]) as vad:
                 align(audio, root / 'input.txt', 'en_us', root / 'output', already_converted=True)
             convert.assert_not_called()
             self.assertEqual(alignment.call_args.args[0], audio)
             self.assertEqual(vad.call_args.args[0], audio)
+
+    def test_ctc_frame_count_at_chunk_boundaries(self):
+        for samples, expected in ((399, 0), (400, 1), (719, 1), (720, 2),
+                                  (480000, 1499), (480320, 1500),
+                                  (528000, 1649), (960000, 2999)):
+            with self.subTest(samples=samples):
+                self.assertEqual(_emission_frame_count(samples), expected)
+
+    def test_ctc_required_frames_include_stars_and_repeated_letters(self):
+        self.assertEqual(_required_ctc_frames([list('a')]), 3)
+        self.assertEqual(_required_ctc_frames([list('aa')]), 5)
+        # Stars separate the same letter across sentences; no blank is needed.
+        self.assertEqual(_required_ctc_frames([list('a'), list('a')]), 5)
+
+    def test_ctc_precheck_allows_exact_fit_and_rejects_impossible_input(self):
+        with tempfile.TemporaryDirectory() as d:
+            audio = Path(d) / 'normalized.wav'
+            with wave.open(str(audio), 'wb') as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(16000)
+                wav.writeframes(b'\0\0' * 1680)  # exactly 5 model frames
+            _precheck_ctc(audio, [list('aa')])
+            with self.assertRaisesRegex(ValueError, 'requires 7 CTC frames, audio provides 5'):
+                _precheck_ctc(audio, [list('aaa')])
+
+    def test_ctc_precheck_runs_before_vad_and_model(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            audio = root / 'normalized.wav'
+            with wave.open(str(audio), 'wb') as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(16000)
+                wav.writeframes(b'\0\0' * 1040)  # 3 frames
+            (root / 'input.txt').write_text('aaaa', encoding='utf-8')
+            with patch('alignment_core.speech_timestamps') as vad, patch('alignment_core._alignment') as alignment:
+                with self.assertRaisesRegex(ValueError, 'Transcript is too long'):
+                    align(audio, root / 'input.txt', 'en_us', root / 'out', already_converted=True)
+            vad.assert_not_called()
+            alignment.assert_not_called()
 
     def test_silence_refinement_and_overlap(self):
         self.assertEqual(refine_times([(0.9, 2.1), (2.0, 3.9)], [(1., 2.), (2.4, 4.)], 5.), [(0.5, 2.2), (2.2, 4.5)])

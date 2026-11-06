@@ -29,6 +29,8 @@ export ALIGN_DEVICE=cuda:0
 
 文本文件使用 UTF-8，每个非空行是一句，也可使用 `ID<TAB>句子`。句子应与录音内容及顺序尽量一致；长句和与音频不一致的文本会影响效果。强制对齐不是语音识别，不会校正转写。对齐时会忽略 `【】` 及其中的标注，并归一化数字和标点；展示及输出保留原文。无法归一化为有效字符的句子会报错。
 
+启动对齐前会根据音频帧数和文本 token 计算 CTC 的最低帧数需求；确定无法容纳文本时提前报错。此检查不判断音文内容是否一致，其他错配仍需人工核对。网页失败任务可点击“错误原因”查看提示；尚未归类的错误保留原始信息。
+
 CSV 按原流程的 Adobe Audition 标记格式输出：UTF-8、制表符分隔，字段为 `Name`、`Start`、`Duration`、`Time Format`、`Type`、`Description`；时间采用 `时:分:秒.微秒`，文本保存在 `Description`。文本结果的 `start` 和 `end` 单位为秒，TextGrid 使用 `sentences` interval tier。处理流程与原脚本一致：转换为 16 kHz 单声道，使用 Silero VAD 检测语音，以 MMS 对齐文本，再根据静音区间修正句子边界。原脚本中的 ASR 识别和文字复核代码处于注释状态，不属于其实际执行流程。
 
 网页中的语种默认为空，提交任务前须填写或选择；输入中文名、英文名、`zh_cn` 等代码或 ISO 代码即可搜索。列表按具体语种或变体展示，例如现代标准阿拉伯语和埃及阿拉伯语；原有地区代码及三字母 ISO 639-3 代码仍可直接输入。语言信息参考 [MMS ISO 信息表](https://github.com/MXuer/mms-alignment-tools/blob/main/MMS_ISO_Information.md)。

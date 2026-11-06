@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>长音频文本对齐服务</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/style.css?v=20261104-language-codes">
+  <link rel="stylesheet" href="/static/style.css?v=20261106-errors">
 </head>
 <body>
   <header>
@@ -106,8 +106,9 @@
     <section id="admin-accounts" class="admin-panel" hidden><div class="toolbar"><h2>账号管理</h2><button id="refresh-users" class="outline" type="button">刷新</button></div><p class="admin-description">管理已登录用户的状态和管理员权限。</p><div id="user-list"></div><p id="admin-message" class="message" role="status"></p></section>
   </main>
   <dialog id="upload-dialog" class="upload-dialog" aria-labelledby="upload-dialog-title"><form method="dialog"><h2 id="upload-dialog-title"></h2><p id="upload-dialog-message"></p><pre id="upload-dialog-details"></pre><div class="upload-dialog-actions"><button id="upload-dialog-cancel" value="cancel" class="outline" type="submit">取消</button><button id="upload-dialog-continue" value="continue" type="submit">继续提交</button></div></form></dialog>
+  <dialog id="job-error-dialog" class="upload-dialog" aria-labelledby="job-error-title" aria-describedby="job-error-file job-error-details"><form method="dialog"><h2 id="job-error-title">任务失败原因</h2><p id="job-error-file"></p><pre id="job-error-details" tabindex="0"></pre><div class="upload-dialog-actions"><button type="submit" class="outline">关闭</button></div></form></dialog>
   <script src="/static/date-picker.js" defer></script>
   <script src="/static/waveform.js"></script>
-  <script src="/static/app.js?v=20261104-language-codes"></script>
+  <script src="/static/app.js?v=20261106-errors"></script>
 </body>
 </html>

@@ -30,6 +30,7 @@ from alignment_languages import COMMON_LANGUAGES, canonical_locale, normalize_la
 from alignment_csv import audition_csv_bytes, read_alignment_csv
 
 from .store import JobStore
+from .error_messages import explain_error
 from .statistics import audio_duration, output_sentences
 from .language_check import router as language_check_router
 from .auth import AuthStore, SmtpCodeSender, require_account, require_admin, router as auth_router
@@ -223,6 +224,10 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         job = store.get(job_id)
         if job is None or (not user['is_admin'] and job['owner_id'] != user['id']):
             raise HTTPException(404, '任务不存在')
+        if job.get('error'):
+            explanation = explain_error(job['error'], job_dir(job_id) / 'input.txt')
+            job['error_code'] = explanation['code']
+            job['error_display'] = explanation['message']
         if job['status'] == 'completed':
             job['artifacts'] = [name for name, filename in FORMATS.items() if (job_dir(job_id) / 'output' / filename).is_file()]
         else:
