@@ -146,7 +146,16 @@ async function copyJobId(id) {
 function showJobError(job) {
   const dialog = $('#job-error-dialog');
   $('#job-error-file').textContent = job.audio_name || '';
-  $('#job-error-details').textContent = job.error_display || job.error || '暂无错误信息。';
+  const details = $('#job-error-details');
+  const message = job.error_display || job.error || '暂无错误信息。';
+  if (job.error_code && job.error_code !== 'unknown' && job.error_display) {
+    const end = message.indexOf('。');
+    const lineEnd = message.indexOf('\n');
+    const split = end >= 0 ? end + 1 : lineEnd >= 0 ? lineEnd : message.length;
+    details.replaceChildren(node('strong', message.slice(0, split), 'job-error-conclusion'), node('span', message.slice(split)));
+  } else {
+    details.textContent = job.error || job.error_display || '暂无错误信息。';
+  }
   dialog.showModal();
 }
 function renderJob(job) {

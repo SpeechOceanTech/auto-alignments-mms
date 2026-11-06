@@ -103,5 +103,6 @@
 @media(max-width:420px){.job-filters,.job-filters.admin-filters{grid-template-columns:1fr}}
 
 .upload-dialog{width:min(600px,calc(100vw - 32px));max-height:80vh;border:1px solid var(--line);border-radius:10px;padding:22px;box-shadow:0 16px 40px #0f172a40}.upload-dialog::backdrop{background:#0f172a88}.upload-dialog h2{margin:0;font-size:18px}.upload-dialog p{color:var(--ink)}.upload-dialog pre{max-height:38vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#f8fafc;padding:12px;border-radius:6px;font:13px/1.6 system-ui}.upload-dialog-actions{display:flex;justify-content:flex-end;gap:8px}
+.job-error-conclusion{color:var(--danger);font-weight:700}
 
 .batch-retry-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.batch-retry-actions button{min-height:32px;font-size:12px}
