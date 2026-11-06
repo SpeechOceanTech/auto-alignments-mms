@@ -52,6 +52,8 @@ Authorization: Bearer <API_KEY>
 
 `POST /v1/language-check` 可在提交前检查语种，JSON 为 `{"language":"en_us","text":"..."}`，需要认证和非空语种。返回 `status`：`match`（文本特征与所选语种一致）、`mismatch`（疑似不一致）或 `uncertain`（无法可靠判断），以及 `selected_language`、`detected_language`、`detected_name`、`message`。这是本机离线辅助检查，短文本、相近语种、混合语言和模型未覆盖的语种可能无法判断。该接口不会创建任务；调用方可根据结果提示用户并决定是否继续提交。批量网页上传会在提交前调用此接口；直接调用任务提交 API 时，调用方需自行检查。
 
+`POST /v1/alignment-precheck` 用于提交前估计文本是否过长，需要认证。JSON 示例：`{"language":"zh_cn","text":"ID\t文本\n001\t你好","duration_seconds":60}`；`duration_seconds` 为音频总时长（秒），未知时传 `null`。返回 `status`（`warning` 疑似过长、`ok` 未超过当前阈值、`unknown` 无法判断）、`message`、`duration_seconds`、`character_count`、`characters_per_second`；不适用或无法获取的指标为 `null`。目前仅对以汉字为主的普通话文本进行检查，忽略行首 ID、常见表头和 `【】` 标注，平均每秒超过 6 个汉字时提示。检查使用音频总时长而非有效语音时长：静音可能掩盖异常；`ok` 不表示音文内容匹配，也无法检查其他语种。检查不会创建任务，调用方应允许用户继续或跳过对应文件；直接调用任务提交 API 时，调用方需自行检查。
+
 ## 创建与查询任务
 
 ### `POST /v1/jobs`
@@ -94,7 +96,7 @@ curl -X POST "$BASE/v1/jobs" \
 | `owner_id` | 仅管理员可指定；`__legacy__` 表示无主的旧网页任务 |
 | `batch_id` | 返回指定批次内的任务 |
 
-响应格式 `{"jobs":[...],"total":0,"limit":50,"offset":0}`。任务记录包括 `id`、`language`、`audio_name`、`status`、`created_at`、`updated_at`、`error`、`owner_id` 和 `artifacts`；管理员列表额外包含 `owner_username`。有错误的任务还包含 `error_code` 和供界面显示的 `error_display`：已归类的错误提供可读提示，未归类的错误使用 `unknown` 并保留原始错误。原始 `error` 字段始终保留。按创建时间倒序排列。
+响应格式 `{"jobs":[...],"total":0,"limit":50,"offset":0}`。任务记录包括 `id`、`language`、`audio_name`、`audio_duration_seconds`（秒，无法取得时为 `null`）、`status`、`created_at`、`updated_at`、`error`、`owner_id` 和 `artifacts`；管理员列表额外包含 `owner_username`。有错误的任务还包含 `error_code` 和供界面显示的 `error_display`：已归类的错误提供可读提示，未归类的错误使用 `unknown` 并保留原始错误。原始 `error` 字段始终保留。按创建时间倒序排列。
 
 错误分类维护在 `alignment_web/error_messages.py`；新增规则时只匹配确认过的错误并补充测试，未命中的错误继续原样显示。
 

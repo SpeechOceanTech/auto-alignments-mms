@@ -33,6 +33,7 @@ from .store import JobStore
 from .error_messages import explain_error
 from .statistics import audio_duration, output_sentences
 from .language_check import router as language_check_router
+from .alignment_precheck import router as alignment_precheck_router
 from .auth import AuthStore, SmtpCodeSender, require_account, require_admin, router as auth_router
 
 LOG = logging.getLogger(__name__)
@@ -207,6 +208,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
     app.state.auth_secure_cookie = os.environ.get('ALIGN_AUTH_SECURE_COOKIE', '0') == '1'
     app.include_router(auth_router)
     app.include_router(language_check_router)
+    app.include_router(alignment_precheck_router)
 
     def job_dir(job_id):
         if not JOB_PATTERN.fullmatch(job_id):
@@ -224,6 +226,7 @@ def create_app(data_dir=None, runner=None, max_audio_bytes=None, auth_store=None
         job = store.get(job_id)
         if job is None or (not user['is_admin'] and job['owner_id'] != user['id']):
             raise HTTPException(404, '任务不存在')
+        job['audio_duration_seconds'] = audio_duration(job_audio(job))
         if job.get('error'):
             explanation = explain_error(job['error'], job_dir(job_id) / 'input.txt')
             job['error_code'] = explanation['code']

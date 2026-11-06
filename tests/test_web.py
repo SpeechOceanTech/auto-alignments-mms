@@ -5,6 +5,7 @@ import json
 import io
 import tempfile
 import unittest
+import wave
 import zipfile
 from pathlib import Path
 
@@ -162,6 +163,24 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         status, content = await call(self.app, 'GET', '/v1/jobs?status=failed')
         listed = next(job for job in json.loads(content)['jobs'] if job['id'] == job_id)
         self.assertEqual(listed['error_display'], detail['error_display'])
+
+    async def test_job_duration_is_available_before_completion(self):
+        job_id = 'd' * 32
+        directory = Path(self.temp.name) / 'jobs' / job_id
+        directory.mkdir()
+        with wave.open(str(directory / 'normalized.wav'), 'wb') as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b'\0\0' * (16000 * 3))
+        with self.app.state.store.connect() as db:
+            db.execute("INSERT INTO jobs (id, language, audio_name, status, owner_id) VALUES (?, 'zh_cn', 'sample.wav', 'failed', ?)", (job_id, self.user['id']))
+        status, content = await call(self.app, 'GET', '/v1/jobs/' + job_id)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(content)['audio_duration_seconds'], 3)
+        status, content = await call(self.app, 'GET', '/v1/jobs?status=failed')
+        listed = next(job for job in json.loads(content)['jobs'] if job['id'] == job_id)
+        self.assertEqual(listed['audio_duration_seconds'], 3)
 
     async def test_restart_marks_running_as_interrupted(self):
         store = self.app.state.store

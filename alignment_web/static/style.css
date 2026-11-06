@@ -106,3 +106,5 @@
 .job-error-conclusion{color:var(--danger);font-weight:700}
 
 .batch-retry-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.batch-retry-actions button{min-height:32px;font-size:12px}
+.job-duration{white-space:nowrap;font-variant-numeric:tabular-nums}
+.precheck-items{max-height:38vh;overflow:auto;margin:0 0 16px}.precheck-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);color:var(--ink);font-size:14px;font-weight:400}.precheck-item input{flex:none;margin-top:3px}.precheck-item-text{min-width:0;overflow-wrap:anywhere}.precheck-item-text strong,.precheck-item-text span{display:block}.precheck-item-text span{margin-top:3px;color:var(--muted);font-size:12px}

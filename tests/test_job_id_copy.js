@@ -21,7 +21,7 @@ vm.runInNewContext(source.slice(start,end), context);
 (async () => {
   const id = 'abcdef12-3456-7890-abcd-ef1234567890';
   const row = context.renderJob({id, audio_name:'test.wav', language:'zh_cn', created_at:'today', status:'completed'});
-  const cell = row.children[4], button = cell.children[0];
+  const cell = row.children[5], button = cell.children[0];
   assert.equal(button.tag, 'button'); assert.equal(button.type, 'button'); assert.equal(button.textContent, 'abcdef12');
   assert.match(button.attributes['aria-label'], new RegExp(id));
   await button.onclick();

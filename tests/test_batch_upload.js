@@ -17,10 +17,10 @@ function $(selector) {
   if (!elements.has(selector)) elements.set(selector, {value:'', files:[], textContent:'', hidden:false, disabled:false, style:{}, classList:{toggle() {}}, setAttribute() {}, addEventListener(name, fn) { this[name] = fn; }});
   return elements.get(selector);
 }
-let responses = [], calls = [], dialogs = [], uploaded = [], refreshes = 0;
+let responses = [], prechecks = [], calls = [], dialogs = [], uploaded = [], refreshes = 0, lengthDialogs = [];
 class FakeFormData { constructor() { this.data = {}; } append(k,v) { this.data[k] = v; } delete(k) { delete this.data[k]; } }
 const context = {$, state:{user:{id:'u'}, selected:new Map(), offset:0}, FormData:FakeFormData, TextDecoder, URLSearchParams, setTimeout,
-  request:async (url, options) => { calls.push({url, body:JSON.parse(options.body)}); assert(responses.length, `unexpected ${url}`); return responses.shift(); },
+  request:async (url, options) => { calls.push({url, body:JSON.parse(options.body)}); if (url === '/v1/alignment-precheck') return prechecks.shift() || {status:'ok'}; assert(responses.length, `unexpected ${url}`); return responses.shift(); },
   json:body => ({body:JSON.stringify(body)}), refresh:async () => { refreshes++; }, selectedDownloadFormats:() => ['csv'], CSV_EXPORT_VERSION:'audition-v2',
   formatDate:value => value, Option:function(text,value) {this.textContent=text;this.value=value;},
   document:{createElement() {return {click() {}};}}, fetch:async () => ({}), URL:{}, XMLHttpRequest:function(){}, showAccount() {}};
@@ -28,7 +28,9 @@ vm.runInNewContext(source.slice(start, stop), context);
 context.fakeDialog = async (title, message, details) => { dialogs.push({title, message, details}); return context.confirm; };
 context.fakeSend = async body => { uploaded.push(body.data); return {job_id:'test'}; };
 context.fakeLoad = async id => { $('#filter-batch').value = id; };
-vm.runInNewContext('uploadDialog = fakeDialog; sendJob = fakeSend; loadBatches = fakeLoad;', context);
+context.fakeDuration = async () => 60;
+context.fakeReview = async warnings => { lengthDialogs.push(warnings); return context.skipped; };
+vm.runInNewContext('uploadDialog = fakeDialog; sendJob = fakeSend; loadBatches = fakeLoad; readAudioDuration = fakeDuration; reviewPrecheckWarnings = fakeReview;', context);
 function file(name, text) { return {name, arrayBuffer:async () => new TextEncoder().encode(text).buffer}; }
 const form = {reset() { this.resetCount = (this.resetCount || 0) + 1; }};
 const submit = () => $('#submit-form').submit({preventDefault(){}, currentTarget:form});
@@ -44,8 +46,9 @@ const submit = () => $('#submit-form').submit({preventDefault(){}, currentTarget
   calls = []; dialogs = []; context.confirm = true;
   responses.push(pairing, {status:'mismatch', message:'检测到英语'}, {batch_id:'batch123'});
   await submit();
-  assert.deepEqual(calls.map(c => c.url), ['/v1/batches/check','/v1/language-check','/v1/batches']);
+  assert.deepEqual(calls.map(c => c.url), ['/v1/batches/check','/v1/language-check','/v1/alignment-precheck','/v1/batches']);
   assert.equal(calls[1].body.language, 'zh_cn'); assert.equal(calls[1].body.text, '你好');
+  assert.equal(calls[2].body.duration_seconds, 60);
   assert.equal(uploaded.length, 1); assert.equal(uploaded[0].audio.name, 'yes.wav'); assert.equal(uploaded[0].text_file.name, 'yes.txt'); assert.equal(uploaded[0].batch_id, 'batch123');
   assert.equal($('#filter-batch').value, 'batch123'); assert.equal(refreshes, 1); assert.equal(dialogs.length, 2);
   assert.match(dialogs[1].details, /yes\.txt：检测到英语/);
@@ -58,7 +61,7 @@ const submit = () => $('#submit-form').submit({preventDefault(){}, currentTarget
   await submit();
   assert.equal(uploaded.length, 1); assert.equal(uploaded[0].audio.name, 'yes.wav');
   assert.match(dialogs[0].details, /bad\.txt/); assert.match(dialogs[0].message, /不会上传/);
-  assert.deepEqual(calls[2].body.audio_names, ['yes.wav']);
+  assert.deepEqual(calls.find(call => call.url === '/v1/batches').body.audio_names, ['yes.wav']);
   uploaded = []; calls = []; dialogs = [];
   $('#batch-files').files = [file('retry.WAV',''), file('retry.TXT','你好')];
   let attempts = 0;
@@ -74,6 +77,19 @@ const submit = () => $('#submit-form').submit({preventDefault(){}, currentTarget
   $('#batch-files').files = [file('english.mp3',''), file('english.txt','English text')];
   responses.push({pairs:[{audio:'english.mp3',text:'english.txt'}],unmatched_audio:[],unmatched_text:[],duplicates:[]}, {status:'mismatch',message:'检测到英语'}); await submit();
   assert.equal(calls[1].url, '/v1/language-check'); assert.equal(uploaded.length, 0); assert.match(dialogs[0].details, /检测到英语/);
+  uploaded = []; calls = []; dialogs = []; lengthDialogs = []; context.confirm = true; context.skipped = new Set(['bad.wav']);
+  $('#batch-files').files = [file('good.wav',''), file('bad.wav',''), file('good.txt','正常文本'), file('bad.txt','很长的文本')];
+  responses.push({pairs:[{audio:'good.wav',text:'good.txt'},{audio:'bad.wav',text:'bad.txt'}],unmatched_audio:[],unmatched_text:[],duplicates:[]}, {status:'match'}, {status:'match'}, {batch_id:'selected'});
+  prechecks.push({status:'ok'}, {status:'warning',message:'文本可能过长'});
+  await submit();
+  assert.equal(lengthDialogs.length, 1); assert.equal(lengthDialogs[0][0].pair.audio, 'bad.wav');
+  assert.deepEqual(calls.find(call => call.url === '/v1/batches').body.audio_names, ['good.wav']);
+  assert.equal(uploaded.length, 1); assert.equal(uploaded[0].audio.name, 'good.wav');
+  uploaded = []; calls = []; lengthDialogs = []; context.skipped = null;
+  $('#batch-files').files = [file('bad.wav',''), file('bad.txt','很长的文本')];
+  responses.push({pairs:[{audio:'bad.wav',text:'bad.txt'}],unmatched_audio:[],unmatched_text:[],duplicates:[]}, {status:'match'});
+  prechecks.push({status:'unknown',message:'无法检查'});
+  await submit(); assert.equal(uploaded.length, 0); assert(!calls.some(call => call.url === '/v1/batches')); assert.equal(lengthDialogs[0][0].result.status, 'unknown');
   calls = []; $('#language').value = ''; await submit(); assert.equal(calls.length, 0); assert.match($('#submit-message').textContent, /语种/);
   console.log('batch upload UI tests passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

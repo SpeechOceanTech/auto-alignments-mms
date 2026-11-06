@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>长音频文本对齐服务</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/style.css?v=20261106-error-conclusion">
+  <link rel="stylesheet" href="/static/style.css?v=20261106-audio-precheck">
 </head>
 <body>
   <header>
@@ -72,7 +72,7 @@
           </div>
           <button id="clear-filters" class="outline" type="button">清除</button>
         </div>
-        <div class="jobs-table-wrap"><table><thead><tr><th><input id="select-all" type="checkbox" aria-label="选择所有任务"></th><th>文件</th><th>语种</th><th id="job-user-header" hidden>用户名</th><th>创建时间</th><th>任务 ID</th><th>状态</th><th>操作 / 下载</th></tr></thead><tbody id="jobs"></tbody></table></div>
+        <div class="jobs-table-wrap"><table><thead><tr><th><input id="select-all" type="checkbox" aria-label="选择所有任务"></th><th>文件</th><th>音频时长</th><th>语种</th><th id="job-user-header" hidden>用户名</th><th>创建时间</th><th>任务 ID</th><th>状态</th><th>操作 / 下载</th></tr></thead><tbody id="jobs"></tbody></table></div>
         <div class="pager"><button id="prev-page" class="outline" type="button">上一页</button><span id="page-info">0–0 / 0</span><button id="next-page" class="outline" type="button">下一页</button></div>
         <p id="jobs-message" class="message" role="status"></p>
       </section>
@@ -106,9 +106,10 @@
     <section id="admin-accounts" class="admin-panel" hidden><div class="toolbar"><h2>账号管理</h2><button id="refresh-users" class="outline" type="button">刷新</button></div><p class="admin-description">管理已登录用户的状态和管理员权限。</p><div id="user-list"></div><p id="admin-message" class="message" role="status"></p></section>
   </main>
   <dialog id="upload-dialog" class="upload-dialog" aria-labelledby="upload-dialog-title"><form method="dialog"><h2 id="upload-dialog-title"></h2><p id="upload-dialog-message"></p><pre id="upload-dialog-details"></pre><div class="upload-dialog-actions"><button id="upload-dialog-cancel" value="cancel" class="outline" type="submit">取消</button><button id="upload-dialog-continue" value="continue" type="submit">继续提交</button></div></form></dialog>
+  <dialog id="precheck-dialog" class="upload-dialog" aria-labelledby="precheck-title"><form method="dialog"><h2 id="precheck-title">音频与文本长度提示</h2><p>以下文件可能存在问题或无法完成检查。取消勾选可跳过该文件；勾选的文件将继续对齐。</p><div id="precheck-items" class="precheck-items"></div><div class="upload-dialog-actions"><button value="cancel" class="outline" type="submit">取消提交</button><button value="continue" type="submit">提交所选</button></div></form></dialog>
   <dialog id="job-error-dialog" class="upload-dialog" aria-labelledby="job-error-title" aria-describedby="job-error-file job-error-details"><form method="dialog"><h2 id="job-error-title">任务失败原因</h2><p id="job-error-file"></p><pre id="job-error-details" tabindex="0"></pre><div class="upload-dialog-actions"><button type="submit" class="outline">关闭</button></div></form></dialog>
   <script src="/static/date-picker.js" defer></script>
   <script src="/static/waveform.js"></script>
-  <script src="/static/app.js?v=20261106-error-conclusion"></script>
+  <script src="/static/app.js?v=20261106-audio-precheck"></script>
 </body>
 </html>
